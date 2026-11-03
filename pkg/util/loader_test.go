@@ -1,17 +1,144 @@
 package util
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestLoadSwaggerWithOverlayBaseDirBaseline(t *testing.T) {
+	if os.Getenv("OAPI_TEST_SCOPED_BASELINE") != "1" {
+		t.Skip("subprocess baseline for original relative loading")
+	}
+	opts := LoadSwaggerWithOverlayOpts{Strict: true}
+	if os.Getenv("OAPI_TEST_SCOPED_OVERLAY") == "1" {
+		opts.Path = "overlay.yaml"
+	}
+	spec, err := LoadSwaggerWithOverlay("spec.yaml", opts)
+	require.NoError(t, err)
+	spec.InternalizeRefs(context.Background(), nil)
+	data, err := spec.MarshalJSON()
+	require.NoError(t, err)
+	_, err = os.Stdout.Write(data)
+	require.NoError(t, err)
+	os.Exit(0)
+}
+
+func TestLoadSwaggerWithOverlayBaseDir(t *testing.T) {
+	baseDir, err := filepath.Abs("testdata/scoped")
+	require.NoError(t, err)
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	executable, err := os.Executable()
+	require.NoError(t, err)
+
+	for _, withOverlay := range []bool{false, true} {
+		t.Run(fmt.Sprint(withOverlay), func(t *testing.T) {
+			cmd := exec.Command(executable, "-test.run=^TestLoadSwaggerWithOverlayBaseDirBaseline$")
+			cmd.Dir = baseDir
+			cmd.Env = append(os.Environ(), "OAPI_TEST_SCOPED_BASELINE=1")
+			if withOverlay {
+				cmd.Env = append(cmd.Env, "OAPI_TEST_SCOPED_OVERLAY=1")
+			}
+			want, err := cmd.Output()
+			require.NoError(t, err)
+			for i := range 8 {
+				t.Run(fmt.Sprint(i), func(t *testing.T) {
+					t.Parallel()
+					opts := LoadSwaggerWithOverlayOpts{BaseDir: baseDir, Strict: true}
+					if i%2 == 0 {
+						opts.BaseDir = "testdata/scoped"
+					}
+					if withOverlay {
+						opts.Path = "overlay.yaml"
+					}
+					spec, err := LoadSwaggerWithOverlay("spec.yaml", opts)
+					require.NoError(t, err)
+					require.Equal(t, "string", spec.Components.Schemas["Record"].Value.Properties["value"].Value.Type.Slice()[0])
+					if withOverlay {
+						require.Equal(t, "scoped overlay applied", spec.Info.Description)
+						require.Equal(t, "integer", spec.Components.Schemas["FromOverlay"].Value.Type.Slice()[0])
+					}
+					spec.InternalizeRefs(context.Background(), nil)
+					got, err := spec.MarshalJSON()
+					require.NoError(t, err)
+					require.Equal(t, string(want), string(got))
+					require.NotContains(t, string(got), filepath.ToSlash(baseDir))
+					current, err := os.Getwd()
+					require.NoError(t, err)
+					require.Equal(t, cwd, current)
+				})
+			}
+		})
+	}
+}
+
+func TestLoadSwaggerWithOverlayBaseDirAbsolutePaths(t *testing.T) {
+	specPath, err := filepath.Abs("testdata/scoped/spec.yaml")
+	require.NoError(t, err)
+	overlayPath, err := filepath.Abs("testdata/scoped/overlay.yaml")
+	require.NoError(t, err)
+	spec, err := LoadSwaggerWithOverlay(specPath, LoadSwaggerWithOverlayOpts{
+		BaseDir: "does-not-exist", Path: overlayPath, Strict: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "scoped overlay applied", spec.Info.Description)
+	require.Equal(t, "string", spec.Components.Schemas["Record"].Value.Properties["value"].Value.Type.Slice()[0])
+}
+
+func TestLocalRefReaderBaseDir(t *testing.T) {
+	reader := localRefReader("testdata/scoped")
+	location := &url.URL{Path: "shared.yaml"}
+	data, err := reader(openapi3.NewLoader(), location)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "title: shared")
+	require.Equal(t, "shared.yaml", location.Path, "the reader must not mutate logical document URLs")
+	location.Scheme = "file"
+	_, err = reader(openapi3.NewLoader(), location)
+	require.NoError(t, err)
+	_, err = reader(openapi3.NewLoader(), &url.URL{Scheme: "https", Host: "example.com", Path: "shared.yaml"})
+	require.ErrorIs(t, err, openapi3.ErrURINotSupported)
+}
+
+func TestLoadSwaggerWithOverlayBaseDirRemotePolicy(t *testing.T) {
+	const top = "https://specs.example.com/spec.yaml"
+	const shared = "https://specs.example.com/shared.yaml"
+	for _, allowed := range []bool{false, true} {
+		t.Run(fmt.Sprint(allowed), func(t *testing.T) {
+			transport := &fakeTransport{docs: map[string]string{
+				top: remoteDoc, shared: strings.ReplaceAll(remoteDoc, "Remote:", "Extra:"),
+			}}
+			opts := LoadSwaggerWithOverlayOpts{
+				BaseDir: "testdata/scoped", Path: "overlay.yaml", Strict: true,
+				AllowRemoteRefsFrom: []string{},
+			}
+			if allowed {
+				opts.AllowRemoteRefsFrom = []string{shared}
+			}
+			spec, err := loadSwaggerWithOverlay(top, opts, &http.Client{Transport: transport})
+			if !allowed {
+				require.ErrorContains(t, err, `refusing to resolve remote reference "`+shared+`"`)
+				require.Equal(t, []string{top}, transport.requested)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, "scoped overlay applied", spec.Info.Description)
+			require.Equal(t, "string", spec.Components.Schemas["FromOverlay"].Value.Type.Slice()[0])
+			require.Equal(t, []string{top, shared}, transport.requested)
+		})
+	}
+}
 
 const remoteDoc = `openapi: "3.0.0"
 info:

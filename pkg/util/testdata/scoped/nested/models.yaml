@@ -1,0 +1,12 @@
+openapi: 3.0.3
+info:
+  title: models
+  version: "1"
+paths: {}
+components:
+  schemas:
+    Record:
+      type: object
+      properties:
+        value:
+          $ref: ../shared.yaml#/components/schemas/Value
