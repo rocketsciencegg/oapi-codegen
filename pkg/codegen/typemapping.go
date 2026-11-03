@@ -66,6 +66,7 @@ func (fm FormatMapping) Resolve(format string) SimpleTypeSpec {
 }
 
 // DefaultTypeMapping provides the default OpenAPI type/format to Go type mappings.
+// Configure it before concurrent use; generation reads but does not modify it.
 var DefaultTypeMapping = TypeMapping{
 	Integer: FormatMapping{
 		Default: SimpleTypeSpec{Type: "int"},

@@ -1647,7 +1647,27 @@ output-options:
 
 ### Using the Go package
 
-Alternatively, you are able to use the underlying code generation as a package, which [will be documented in the future](https://github.com/oapi-codegen/oapi-codegen/issues/1487).
+Alternatively, use the underlying code generation as a Go package:
+
+```go
+generator := codegen.NewGenerator(codegen.WithConfig(codegen.Configuration{
+    PackageName: "api",
+    Generate: codegen.GenerateOptions{
+        Models: true,
+        Client: true,
+    },
+}))
+code, err := generator.Generate(spec)
+```
+
+The existing `codegen.Generate(spec, config)` function remains available.
+Generators can be reused concurrently, but each invocation must use an
+independently loaded specification because generation may filter and prune it.
+Do not mutate configuration or legacy registries during generation; shared
+template hooks must be concurrency-safe. Use `WithTemplateFuncs` for
+per-generator template customizations.
+See the [Go documentation](https://pkg.go.dev/github.com/oapi-codegen/oapi-codegen/v2/pkg/codegen)
+for options, template hooks, and concurrency requirements.
 
 ## Additional Properties (`additionalProperties`)
 

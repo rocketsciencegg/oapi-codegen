@@ -64,13 +64,14 @@ func TestUsedAndUndeclaredVariables(t *testing.T) {
 // renderServerURLs parses the embedded templates and renders the
 // server-urls template for spec, mirroring the setup in Generate.
 func renderServerURLs(t *testing.T, spec *openapi3.T) string {
+	gen := newDefaultState()
+
 	t.Helper()
 	// Generate registers `opts` before parsing; mirror that here so the
 	// (unrelated) framework templates parse cleanly.
-	TemplateFunctions["opts"] = func() Configuration { return globalState.options }
-	tmpl := template.New("oapi-codegen").Funcs(TemplateFunctions)
+	tmpl := template.New("oapi-codegen").Funcs(gen.functions(gen.templateOverrides))
 	require.NoError(t, LoadTemplates(templates, tmpl))
-	out, err := GenerateServerURLs(tmpl, spec)
+	out, err := gen.GenerateServerURLs(tmpl, spec)
 	require.NoError(t, err)
 	return out
 }
@@ -172,6 +173,8 @@ func topLevelDeclNames(file *ast.File) []string {
 }
 
 func TestBuildServerURLTypeDefinitions(t *testing.T) {
+	gen := newDefaultState()
+
 	t.Run("synthesises one TypeDefinition per enum-typed used variable", func(t *testing.T) {
 		spec := &openapi3.T{
 			Servers: openapi3.Servers{
@@ -183,7 +186,7 @@ func TestBuildServerURLTypeDefinitions(t *testing.T) {
 				},
 			},
 		}
-		defs, err := BuildServerURLTypeDefinitions(spec)
+		defs, err := gen.BuildServerURLTypeDefinitions(spec)
 		require.NoError(t, err)
 		require.Len(t, defs, 1)
 		assert.True(t, defs[0].ForceEnumPrefix, "server-URL enum types must keep prefixed identifiers")
@@ -202,7 +205,7 @@ func TestBuildServerURLTypeDefinitions(t *testing.T) {
 				},
 			},
 		}
-		defs, err := BuildServerURLTypeDefinitions(spec)
+		defs, err := gen.BuildServerURLTypeDefinitions(spec)
 		require.NoError(t, err)
 		assert.Empty(t, defs)
 	})
@@ -218,7 +221,7 @@ func TestBuildServerURLTypeDefinitions(t *testing.T) {
 				},
 			},
 		}
-		defs, err := BuildServerURLTypeDefinitions(spec)
+		defs, err := gen.BuildServerURLTypeDefinitions(spec)
 		require.NoError(t, err)
 		assert.Empty(t, defs)
 	})
@@ -235,7 +238,7 @@ func TestBuildServerURLTypeDefinitions(t *testing.T) {
 				},
 			},
 		}
-		_, err := BuildServerURLTypeDefinitions(spec)
+		_, err := gen.BuildServerURLTypeDefinitions(spec)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "port")
 		assert.Contains(t, err.Error(), "12345")
@@ -256,7 +259,7 @@ func TestBuildServerURLTypeDefinitions(t *testing.T) {
 				},
 			},
 		}
-		defs, err := BuildServerURLTypeDefinitions(spec)
+		defs, err := gen.BuildServerURLTypeDefinitions(spec)
 		require.NoError(t, err)
 		require.Len(t, defs, 1)
 		assert.Len(t, defs[0].Schema.EnumValues, 2)

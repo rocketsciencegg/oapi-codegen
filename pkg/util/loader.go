@@ -23,10 +23,15 @@ func LoadSwagger(filePath string) (swagger *openapi3.T, err error) {
 }
 
 func loadSwagger(filePath string, allowRemoteRefsFrom []string, client *http.Client) (*openapi3.T, error) {
+	return loadSwaggerWithBaseDir(filePath, "", allowRemoteRefsFrom, client)
+}
+
+func loadSwaggerWithBaseDir(filePath, baseDir string, allowRemoteRefsFrom []string, client *http.Client) (*openapi3.T, error) {
+	loader := newLoader(filePath, baseDir, allowRemoteRefsFrom, client)
 	if u := specURL(filePath); u != nil {
-		return newLoader(filePath, allowRemoteRefsFrom, client).LoadFromURI(u)
+		return loader.LoadFromURI(u)
 	}
-	return newLoader(filePath, allowRemoteRefsFrom, client).LoadFromFile(filePath)
+	return loader.LoadFromFile(filePath)
 }
 
 // specURL returns filePath parsed as a URL when it is one with a scheme and a
@@ -44,7 +49,7 @@ func specURL(filePath string) *url.URL {
 // allowRemoteRefsFrom. When filePath is itself a URL, the document is fetched
 // through the same reader, so that one URL is allowed as well: the caller
 // named it.
-func newLoader(filePath string, allowRemoteRefsFrom []string, client *http.Client) *openapi3.Loader {
+func newLoader(filePath, baseDir string, allowRemoteRefsFrom []string, client *http.Client) *openapi3.Loader {
 	if allowRemoteRefsFrom == nil {
 		// On the 2.8 release line an unset list keeps the behaviour of earlier
 		// releases, which followed every remote reference. An explicit empty
@@ -69,9 +74,24 @@ func newLoader(filePath string, allowRemoteRefsFrom []string, client *http.Clien
 	// keep working so that import-mapping across files is unaffected.
 	loader.ReadFromURIFunc = openapi3.URIMapCache(openapi3.ReadFromURIs(
 		remoteRefReader(allowRemoteRefsFrom, client),
-		openapi3.ReadFromFile,
+		localRefReader(baseDir),
 	))
 	return loader
+}
+
+// localRefReader resolves relative reads against baseDir without changing the document URLs
+// kin-openapi uses to resolve references and name bundled schemas.
+func localRefReader(baseDir string) openapi3.ReadFromURIFunc {
+	return func(loader *openapi3.Loader, location *url.URL) ([]byte, error) {
+		if baseDir == "" || location.Host != "" ||
+			(location.Scheme != "" && location.Scheme != "file") ||
+			filepath.IsAbs(filepath.FromSlash(location.Path)) {
+			return openapi3.ReadFromFile(loader, location)
+		}
+		physical := *location
+		physical.Path = filepath.ToSlash(filepath.Join(baseDir, filepath.FromSlash(location.Path)))
+		return openapi3.ReadFromFile(loader, &physical)
+	}
 }
 
 // remoteRefReader returns a reader for references that name a host. It refuses
@@ -126,6 +146,12 @@ func LoadSwaggerWithCircularReferenceCount(filePath string, _ int) (swagger *ope
 type LoadSwaggerWithOverlayOpts struct {
 	Path   string
 	Strict bool
+	// BaseDir resolves relative local specification, reference, and overlay
+	// reads without changing their logical document URLs or the process's
+	// working directory. Empty uses the current working directory.
+	// Absolute local paths and remote URLs are unaffected.
+	// This is not a security boundary: relative paths may traverse outside BaseDir.
+	BaseDir string
 	// AllowRemoteRefsFrom lists the remote document URLs that external $refs
 	// may be fetched from, see RemoteRefAllowed. nil allows every URL, as
 	// earlier 2.8 releases did; an empty, non-nil list refuses every remote
@@ -138,7 +164,7 @@ func LoadSwaggerWithOverlay(filePath string, opts LoadSwaggerWithOverlayOpts) (s
 }
 
 func loadSwaggerWithOverlay(filePath string, opts LoadSwaggerWithOverlayOpts, client *http.Client) (swagger *openapi3.T, err error) {
-	spec, err := loadSwagger(filePath, opts.AllowRemoteRefsFrom, client)
+	spec, err := loadSwaggerWithBaseDir(filePath, opts.BaseDir, opts.AllowRemoteRefsFrom, client)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load OpenAPI specification: %w", err)
 	}
@@ -162,7 +188,11 @@ func loadSwaggerWithOverlay(filePath string, opts LoadSwaggerWithOverlayOpts, cl
 		return nil, fmt.Errorf("failed to parse spec from %#v: %w", filePath, err)
 	}
 
-	overlay, err := loader.LoadOverlay(opts.Path)
+	overlayPath := opts.Path
+	if opts.BaseDir != "" && !filepath.IsAbs(overlayPath) {
+		overlayPath = filepath.Join(opts.BaseDir, overlayPath)
+	}
+	overlay, err := loader.LoadOverlay(overlayPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load Overlay from %#v: %v", opts.Path, err)
 	}
@@ -192,7 +222,7 @@ func loadSwaggerWithOverlay(filePath string, opts LoadSwaggerWithOverlayOpts, cl
 	// The same policy as the first load, including the document's own URL,
 	// and the same location, so that relative references in the overlaid
 	// document resolve where they did in the original one.
-	loader := newLoader(filePath, opts.AllowRemoteRefsFrom, client)
+	loader := newLoader(filePath, opts.BaseDir, opts.AllowRemoteRefsFrom, client)
 	location := specURL(filePath)
 	if location == nil {
 		location = &url.URL{Path: filepath.ToSlash(filePath)}

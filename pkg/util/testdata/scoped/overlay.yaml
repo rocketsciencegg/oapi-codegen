@@ -1,0 +1,12 @@
+overlay: 1.0.0
+info:
+  title: scoped overlay
+  version: "1"
+actions:
+  - target: $.info
+    update:
+      description: scoped overlay applied
+  - target: $.components.schemas
+    update:
+      FromOverlay:
+        $ref: shared.yaml#/components/schemas/Extra

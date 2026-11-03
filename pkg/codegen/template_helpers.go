@@ -42,10 +42,6 @@ var (
 	contentTypesHalJSON = []string{"application/hal+json"}
 	contentTypesYAML    = []string{"application/yaml", "application/x-yaml", "text/yaml", "text/x-yaml"}
 	contentTypesXML     = []string{"application/xml", "text/xml", "application/problems+xml"}
-
-	responseTypeSuffix = "Response"
-
-	titleCaser = cases.Title(language.English)
 )
 
 // genParamArgs takes an array of Parameter definition, and generates a valid
@@ -94,11 +90,11 @@ func genParamNames(params []ParameterDefinition) string {
 }
 
 // genResponsePayload generates the payload returned at the end of each client request function
-func genResponsePayload(operationID string) string {
+func (s *state) genResponsePayload(operationID string) string {
 	var buffer = bytes.NewBufferString("")
 
 	// Here is where we build up a response:
-	fmt.Fprintf(buffer, "&%s{\n", genResponseTypeName(operationID))
+	fmt.Fprintf(buffer, "&%s{\n", s.genResponseTypeName(operationID))
 	fmt.Fprintf(buffer, "Body: bodyBytes,\n")
 	fmt.Fprintf(buffer, "HTTPResponse: rsp,\n")
 	fmt.Fprintf(buffer, "}")
@@ -312,11 +308,11 @@ func buildUnmarshalCaseStrict(typeDefinition ResponseTypeDefinition, caseAction 
 // genResponseTypeName creates the name of generated response types (given the operationID).
 // It first checks if the multi-pass name resolver has assigned a name for this
 // wrapper type (which would happen if the default name collides with a schema type).
-func genResponseTypeName(operationID string) string {
-	if name, ok := globalState.resolvedClientWrapperNames[operationID]; ok {
+func (s *state) genResponseTypeName(operationID string) string {
+	if name, ok := s.resolvedClientWrapperNames[operationID]; ok {
 		return name
 	}
-	return fmt.Sprintf("%s%s", UppercaseFirstCharacter(operationID), responseTypeSuffix)
+	return fmt.Sprintf("%s%s", UppercaseFirstCharacter(operationID), s.responseTypeSuffix)
 }
 
 func getResponseTypeDefinitions(op *OperationDefinition) []ResponseTypeDefinition {
@@ -431,37 +427,43 @@ func httpMethodConstant(method string) string {
 
 // TemplateFunctions is passed to the template engine, and we can call each
 // function here by keyName from the template code.
-var TemplateFunctions = template.FuncMap{
-	"genParamArgs":               genParamArgs,
-	"genParamTypes":              genParamTypes,
-	"genParamNames":              genParamNames,
-	"genParamFmtString":          ReplacePathParamsWithStr,
-	"swaggerUriToIrisUri":        SwaggerUriToIrisUri,
-	"swaggerUriToEchoUri":        SwaggerUriToEchoUri,
-	"swaggerUriToFiberUri":       SwaggerUriToFiberUri,
-	"swaggerUriToChiUri":         SwaggerUriToChiUri,
-	"swaggerUriToGinUri":         SwaggerUriToGinUri,
-	"swaggerUriToGorillaUri":     SwaggerUriToGorillaUri,
-	"swaggerUriToStdHttpUri":     SwaggerUriToStdHttpUri,
-	"lcFirst":                    LowercaseFirstCharacter,
-	"ucFirst":                    UppercaseFirstCharacter,
-	"ucFirstWithPkgName":         UppercaseFirstCharacterWithPkgName,
-	"camelCase":                  ToCamelCase,
-	"genResponsePayload":         genResponsePayload,
-	"genResponseTypeName":        genResponseTypeName,
-	"genResponseUnmarshal":       genResponseUnmarshal,
-	"getConditionOfResponseName": getConditionOfResponseName,
-	"responsesWithHeaders":       responsesWithHeaders,
-	"getResponseTypeDefinitions": getResponseTypeDefinitions,
-	"toStringArray":              toStringArray,
-	"lower":                      strings.ToLower,
-	"title":                      titleCaser.String,
-	"stripNewLines":              stripNewLines,
-	"sanitizeGoIdentity":         SanitizeGoIdentity,
-	"schemaNameToTypeName":       SchemaNameToTypeName,
-	"toGoString":                 StringToGoString,
-	"toGoComment":                StringWithTypeNameToGoComment,
+// Configure it before concurrent use; generation reads but does not modify it.
+// Use WithTemplateFuncs for per-generator customizations.
+var TemplateFunctions template.FuncMap
 
-	"genServerURLWithVariablesFunctionParams": genServerURLWithVariablesFunctionParams,
-	"httpMethodConstant":                      httpMethodConstant,
+func init() {
+	TemplateFunctions = template.FuncMap{
+		"genParamArgs":               genParamArgs,
+		"genParamTypes":              genParamTypes,
+		"genParamNames":              genParamNames,
+		"genParamFmtString":          ReplacePathParamsWithStr,
+		"swaggerUriToIrisUri":        SwaggerUriToIrisUri,
+		"swaggerUriToEchoUri":        SwaggerUriToEchoUri,
+		"swaggerUriToFiberUri":       SwaggerUriToFiberUri,
+		"swaggerUriToChiUri":         SwaggerUriToChiUri,
+		"swaggerUriToGinUri":         SwaggerUriToGinUri,
+		"swaggerUriToGorillaUri":     SwaggerUriToGorillaUri,
+		"swaggerUriToStdHttpUri":     SwaggerUriToStdHttpUri,
+		"lcFirst":                    LowercaseFirstCharacter,
+		"ucFirst":                    UppercaseFirstCharacter,
+		"ucFirstWithPkgName":         UppercaseFirstCharacterWithPkgName,
+		"camelCase":                  ToCamelCase,
+		"genResponsePayload":         genResponsePayload,
+		"genResponseTypeName":        genResponseTypeName,
+		"genResponseUnmarshal":       genResponseUnmarshal,
+		"getConditionOfResponseName": getConditionOfResponseName,
+		"responsesWithHeaders":       responsesWithHeaders,
+		"getResponseTypeDefinitions": getResponseTypeDefinitions,
+		"toStringArray":              toStringArray,
+		"lower":                      strings.ToLower,
+		"title":                      func(s string) string { return cases.Title(language.English).String(s) },
+		"stripNewLines":              stripNewLines,
+		"sanitizeGoIdentity":         SanitizeGoIdentity,
+		"schemaNameToTypeName":       SchemaNameToTypeName,
+		"toGoString":                 StringToGoString,
+		"toGoComment":                StringWithTypeNameToGoComment,
+
+		"genServerURLWithVariablesFunctionParams": genServerURLWithVariablesFunctionParams,
+		"httpMethodConstant":                      httpMethodConstant,
+	}
 }

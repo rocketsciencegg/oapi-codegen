@@ -8,13 +8,13 @@ import (
 // ensureExternalRefsInRequestBodyDefinitions ensures that when an externalRef (`$ref` that points to a file that isn't the current spec) is encountered, we make sure we update our underlying `RefType` to make sure that we point to that type.
 // This only happens if we have a non-empty `ref` passed in, and that `ref` isn't pointing to something in our file
 // NOTE that the pointer here allows us to pass in a reference and edit in-place
-func ensureExternalRefsInRequestBodyDefinitions(defs *[]RequestBodyDefinition, ref string) {
+func (s *state) ensureExternalRefsInRequestBodyDefinitions(defs *[]RequestBodyDefinition, ref string) {
 	if ref == "" {
 		return
 	}
 
 	for i, rbd := range *defs {
-		ensureExternalRefsInSchema(&rbd.Schema, ref)
+		s.ensureExternalRefsInSchema(&rbd.Schema, ref)
 
 		// make sure we then update it in-place
 		(*defs)[i] = rbd
@@ -24,14 +24,14 @@ func ensureExternalRefsInRequestBodyDefinitions(defs *[]RequestBodyDefinition, r
 // ensureExternalRefsInResponseDefinitions ensures that when an externalRef (`$ref` that points to a file that isn't the current spec) is encountered, we make sure we update our underlying `RefType` to make sure that we point to that type.
 // This only happens if we have a non-empty `ref` passed in, and that `ref` isn't pointing to something in our file
 // NOTE that the pointer here allows us to pass in a reference and edit in-place
-func ensureExternalRefsInResponseDefinitions(defs *[]ResponseDefinition, ref string) {
+func (s *state) ensureExternalRefsInResponseDefinitions(defs *[]ResponseDefinition, ref string) {
 	if ref == "" {
 		return
 	}
 
 	for i, rd := range *defs {
 		for j, rcd := range rd.Contents {
-			ensureExternalRefsInSchema(&rcd.Schema, ref)
+			s.ensureExternalRefsInSchema(&rcd.Schema, ref)
 
 			// make sure we then update it in-place
 			rd.Contents[j] = rcd
@@ -45,13 +45,13 @@ func ensureExternalRefsInResponseDefinitions(defs *[]ResponseDefinition, ref str
 // ensureExternalRefsInParameterDefinitions ensures that when an externalRef (`$ref` that points to a file that isn't the current spec) is encountered, we make sure we update our underlying `RefType` to make sure that we point to that type.
 // This only happens if we have a non-empty `ref` passed in, and that `ref` isn't pointing to something in our file
 // NOTE that the pointer here allows us to pass in a reference and edit in-place
-func ensureExternalRefsInParameterDefinitions(defs *[]ParameterDefinition, ref string) {
+func (s *state) ensureExternalRefsInParameterDefinitions(defs *[]ParameterDefinition, ref string) {
 	if ref == "" {
 		return
 	}
 
 	for i, pd := range *defs {
-		ensureExternalRefsInSchema(&pd.Schema, ref)
+		s.ensureExternalRefsInSchema(&pd.Schema, ref)
 
 		// make sure we then update it in-place
 		(*defs)[i] = pd
@@ -61,12 +61,12 @@ func ensureExternalRefsInParameterDefinitions(defs *[]ParameterDefinition, ref s
 // externalPackageFor returns the imported Go package name for a `$ref` that
 // targets a file outside the current spec. Returns an empty string when the
 // ref is empty, points within the current spec, or has no import-mapping.
-func externalPackageFor(ref string) string {
+func (s *state) externalPackageFor(ref string) string {
 	if ref == "" {
 		return ""
 	}
 	parts := strings.SplitN(ref, "#", 2)
-	if pack, ok := globalState.importMapping[parts[0]]; ok {
+	if pack, ok := s.importMapping[parts[0]]; ok {
 		return pack.Name
 	}
 	return ""
@@ -77,13 +77,13 @@ func externalPackageFor(ref string) string {
 // This only happens if we have a non-empty `ref` passed in, and that `ref` isn't pointing to something in our file
 //
 // NOTE that the pointer here allows us to pass in a reference and edit in-place
-func ensureExternalRefsInSchema(schema *Schema, ref string) {
+func (s *state) ensureExternalRefsInSchema(schema *Schema, ref string) {
 	if ref == "" {
 		return
 	}
 
 	parts := strings.SplitN(ref, "#", 2)
-	pack, ok := globalState.importMapping[parts[0]]
+	pack, ok := s.importMapping[parts[0]]
 	if !ok {
 		return
 	}

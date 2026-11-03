@@ -8,6 +8,8 @@ import (
 )
 
 func TestResolveNames_NoCollisions(t *testing.T) {
+	gen := newDefaultState()
+
 	schemas := []*GatheredSchema{
 		{
 			Path:          SchemaPath{"components", "schemas", "Pet"},
@@ -23,13 +25,15 @@ func TestResolveNames_NoCollisions(t *testing.T) {
 		},
 	}
 
-	result := ResolveNames(schemas)
+	result := gen.ResolveNames(schemas)
 
 	assert.Equal(t, "Pet", result["components/schemas/Pet"])
 	assert.Equal(t, "Owner", result["components/schemas/Owner"])
 }
 
 func TestResolveNames_Issue200_CrossSectionCollisions(t *testing.T) {
+	gen := newDefaultState()
+
 	// "Bar" appears in schemas, parameters, responses, requestBodies, headers
 	schemas := []*GatheredSchema{
 		{
@@ -66,7 +70,7 @@ func TestResolveNames_Issue200_CrossSectionCollisions(t *testing.T) {
 		},
 	}
 
-	result := ResolveNames(schemas)
+	result := gen.ResolveNames(schemas)
 
 	// Component schema is privileged — keeps bare name
 	assert.Equal(t, "Bar", result["components/schemas/Bar"])
@@ -78,6 +82,8 @@ func TestResolveNames_Issue200_CrossSectionCollisions(t *testing.T) {
 }
 
 func TestResolveNames_Issue1474_ClientWrapperCollision(t *testing.T) {
+	gen := newDefaultState()
+
 	// Schema named "CreateChatCompletionResponse" collides with
 	// client wrapper for operation "createChatCompletion" which
 	// would generate "CreateChatCompletionResponse".
@@ -95,7 +101,7 @@ func TestResolveNames_Issue1474_ClientWrapperCollision(t *testing.T) {
 		},
 	}
 
-	result := ResolveNames(schemas)
+	result := gen.ResolveNames(schemas)
 
 	// Component schema is privileged — keeps its name
 	assert.Equal(t, "CreateChatCompletionResponse", result["components/schemas/CreateChatCompletionResponse"])
@@ -108,6 +114,8 @@ func TestResolveNames_Issue1474_ClientWrapperCollision(t *testing.T) {
 }
 
 func TestResolveNames_PrivilegedComponentSchema(t *testing.T) {
+	gen := newDefaultState()
+
 	// When exactly one collision member is a component schema,
 	// it keeps the bare name
 	schemas := []*GatheredSchema{
@@ -125,13 +133,15 @@ func TestResolveNames_PrivilegedComponentSchema(t *testing.T) {
 		},
 	}
 
-	result := ResolveNames(schemas)
+	result := gen.ResolveNames(schemas)
 
 	assert.Equal(t, "Foo", result["components/schemas/Foo"])
 	assert.Equal(t, "FooParameter", result["components/parameters/Foo"])
 }
 
 func TestResolveNames_NoComponentSchema_AllGetSuffixes(t *testing.T) {
+	gen := newDefaultState()
+
 	// When no member is a component schema, all get suffixed
 	schemas := []*GatheredSchema{
 		{
@@ -149,13 +159,15 @@ func TestResolveNames_NoComponentSchema_AllGetSuffixes(t *testing.T) {
 		},
 	}
 
-	result := ResolveNames(schemas)
+	result := gen.ResolveNames(schemas)
 
 	assert.Equal(t, "FooParameter", result["components/parameters/Foo"])
 	assert.Equal(t, "FooResponse", result["components/responses/Foo/content/application/json"])
 }
 
 func TestResolveNames_NumericFallback(t *testing.T) {
+	gen := newDefaultState()
+
 	// Two schemas with same context that can't be disambiguated
 	// by context suffix (both are component schemas)
 	schemas := []*GatheredSchema{
@@ -175,7 +187,7 @@ func TestResolveNames_NumericFallback(t *testing.T) {
 		},
 	}
 
-	result := ResolveNames(schemas)
+	result := gen.ResolveNames(schemas)
 
 	names := make(map[string]bool)
 	for _, name := range result {
@@ -186,6 +198,8 @@ func TestResolveNames_NumericFallback(t *testing.T) {
 }
 
 func TestResolveNames_MultipleJsonContentTypes(t *testing.T) {
+	gen := newDefaultState()
+
 	// "Order" appears in schemas and requestBodies. The requestBody has
 	// 3 content types that all contain "json" and map to the same "JSON"
 	// suffix. The global phase approach should prevent oscillation between
@@ -220,7 +234,7 @@ func TestResolveNames_MultipleJsonContentTypes(t *testing.T) {
 		},
 	}
 
-	result := ResolveNames(schemas)
+	result := gen.ResolveNames(schemas)
 
 	// Component schema keeps bare name
 	assert.Equal(t, "Order", result["components/schemas/Order"])
@@ -246,6 +260,8 @@ func TestResolveNames_MultipleJsonContentTypes(t *testing.T) {
 }
 
 func TestResolveNames_XGoNamePinned_Schema(t *testing.T) {
+	gen := newDefaultState()
+
 	// Pattern K: schema "Renamer" has x-go-name="SpecialName" which collides
 	// with nothing, but a response also named "Renamer" should keep its
 	// normal resolved name. The schema is pinned.
@@ -266,7 +282,7 @@ func TestResolveNames_XGoNamePinned_Schema(t *testing.T) {
 		},
 	}
 
-	result := ResolveNames(schemas)
+	result := gen.ResolveNames(schemas)
 
 	// Schema pinned to SpecialName
 	assert.Equal(t, "SpecialName", result["components/schemas/Renamer"])
@@ -275,6 +291,8 @@ func TestResolveNames_XGoNamePinned_Schema(t *testing.T) {
 }
 
 func TestResolveNames_XGoNamePinned_Response(t *testing.T) {
+	gen := newDefaultState()
+
 	// Pattern L: response "Outcome" has x-go-name="OutcomeResult" and
 	// schema also named "Outcome". The response is pinned as "OutcomeResult",
 	// so the schema keeps "Outcome" (no collision).
@@ -295,7 +313,7 @@ func TestResolveNames_XGoNamePinned_Response(t *testing.T) {
 		},
 	}
 
-	result := ResolveNames(schemas)
+	result := gen.ResolveNames(schemas)
 
 	// Schema keeps bare name
 	assert.Equal(t, "Outcome", result["components/schemas/Outcome"])
@@ -304,6 +322,8 @@ func TestResolveNames_XGoNamePinned_Response(t *testing.T) {
 }
 
 func TestResolveNames_XGoNamePinned_RequestBody(t *testing.T) {
+	gen := newDefaultState()
+
 	// Pattern M: requestBody "Payload" has x-go-name="PayloadBody" and
 	// schema also named "Payload". The requestBody is pinned.
 	schemas := []*GatheredSchema{
@@ -323,7 +343,7 @@ func TestResolveNames_XGoNamePinned_RequestBody(t *testing.T) {
 		},
 	}
 
-	result := ResolveNames(schemas)
+	result := gen.ResolveNames(schemas)
 
 	// Schema keeps bare name
 	assert.Equal(t, "Payload", result["components/schemas/Payload"])
@@ -332,6 +352,8 @@ func TestResolveNames_XGoNamePinned_RequestBody(t *testing.T) {
 }
 
 func TestResolveNames_PinnedNotModifiedByStrategies(t *testing.T) {
+	gen := newDefaultState()
+
 	// Pinned name "Foo" vs non-pinned parameter "Foo" → parameter gets suffixed
 	schemas := []*GatheredSchema{
 		{
@@ -349,7 +371,7 @@ func TestResolveNames_PinnedNotModifiedByStrategies(t *testing.T) {
 		},
 	}
 
-	result := ResolveNames(schemas)
+	result := gen.ResolveNames(schemas)
 
 	// Pinned schema stays as "Foo"
 	assert.Equal(t, "Foo", result["components/schemas/Foo"])
@@ -358,6 +380,8 @@ func TestResolveNames_PinnedNotModifiedByStrategies(t *testing.T) {
 }
 
 func TestContentTypeSuffix(t *testing.T) {
+	gen := newDefaultState()
+
 	tests := []struct {
 		input    string
 		expected string
@@ -373,7 +397,7 @@ func TestContentTypeSuffix(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			assert.Equal(t, tt.expected, contentTypeSuffix(tt.input))
+			assert.Equal(t, tt.expected, gen.contentTypeSuffix(tt.input))
 		})
 	}
 }

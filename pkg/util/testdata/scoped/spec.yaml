@@ -1,0 +1,9 @@
+openapi: 3.0.3
+info:
+  title: scoped loading
+  version: "1"
+paths: {}
+components:
+  schemas:
+    Record:
+      $ref: nested/models.yaml#/components/schemas/Record

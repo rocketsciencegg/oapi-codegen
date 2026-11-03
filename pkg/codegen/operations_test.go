@@ -89,6 +89,8 @@ func TestIsJson(t *testing.T) {
 }
 
 func TestGenerateDefaultOperationID(t *testing.T) {
+	gen := newDefaultState()
+
 	type test struct {
 		op      string
 		path    string
@@ -134,7 +136,7 @@ func TestGenerateDefaultOperationID(t *testing.T) {
 	}
 
 	for _, test := range suite {
-		got, err := generateDefaultOperationID(test.op, test.path)
+		got, err := gen.generateDefaultOperationID(test.op, test.path)
 		if err != nil {
 			if !test.wantErr {
 				t.Fatalf("did not expected error but got %v", err)

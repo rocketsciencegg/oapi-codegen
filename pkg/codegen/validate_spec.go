@@ -625,8 +625,8 @@ func collectUnionView(s *openapi3.Schema, view *unionView, mergeAllOf bool, seen
 // Like the generators, this reads the options of the run Generate has set up;
 // ValidateSpec does not call it, so that its result does not depend on an
 // earlier run.
-func allOfMergesUnions() bool {
-	return !globalState.options.Compatibility.OldMergeSchemas
+func (s *state) allOfMergesUnions() bool {
+	return !s.options.Compatibility.OldMergeSchemas
 }
 
 // checkImplicitMappingKeys validates the discriminator mapping keys the union
