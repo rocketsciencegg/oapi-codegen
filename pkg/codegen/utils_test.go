@@ -99,6 +99,8 @@ func TestToCamelCaseWithDigits(t *testing.T) {
 }
 
 func TestToCamelCaseWithInitialisms(t *testing.T) {
+	gen := newDefaultState()
+
 	tests := []struct {
 		str  string
 		want string
@@ -151,7 +153,7 @@ func TestToCamelCaseWithInitialisms(t *testing.T) {
 	for i := range tests {
 		tt := tests[i]
 		t.Run(tt.str, func(t *testing.T) {
-			require.Equal(t, tt.want, ToCamelCaseWithInitialisms(tt.str))
+			require.Equal(t, tt.want, gen.ToCamelCaseWithInitialisms(tt.str))
 		})
 	}
 }
@@ -232,8 +234,10 @@ components:
 }
 
 func TestRefPathToGoType(t *testing.T) {
-	old := globalState.importMapping
-	globalState.importMapping = constructImportMapping(
+	gen := newDefaultState()
+
+	old := gen.importMapping
+	gen.importMapping = constructImportMapping(
 		map[string]string{
 			"doc.json":                    "externalref0",
 			"http://deepmap.com/doc.json": "externalref1",
@@ -241,7 +245,7 @@ func TestRefPathToGoType(t *testing.T) {
 			"dj-current-package.yml": "-",
 		},
 	)
-	defer func() { globalState.importMapping = old }()
+	defer func() { gen.importMapping = old }()
 
 	tests := []struct {
 		name   string
@@ -304,7 +308,7 @@ func TestRefPathToGoType(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			goType, err := RefPathToGoType(tc.path)
+			goType, err := gen.RefPathToGoType(tc.path)
 			if tc.goType == "" {
 				assert.Error(t, err)
 				return
@@ -705,6 +709,8 @@ func TestEscapePathElements(t *testing.T) {
 }
 
 func TestSchemaNameToTypeName(t *testing.T) {
+	gen := newDefaultState()
+
 	t.Parallel()
 
 	for in, want := range map[string]string{
@@ -727,7 +733,7 @@ func TestSchemaNameToTypeName(t *testing.T) {
 		"<":            "LessThan",
 		">":            "GreaterThan",
 	} {
-		assert.Equal(t, want, SchemaNameToTypeName(in))
+		assert.Equal(t, want, gen.SchemaNameToTypeName(in))
 	}
 }
 
@@ -787,6 +793,8 @@ func TestLowercaseFirstCharacters(t *testing.T) {
 }
 
 func Test_replaceInitialism(t *testing.T) {
+	gen := newDefaultState()
+
 	type args struct {
 		s string
 	}
@@ -833,7 +841,7 @@ func Test_replaceInitialism(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equalf(t, tt.want, replaceInitialism(tt.args.s), "replaceInitialism(%v)", tt.args.s)
+			assert.Equalf(t, tt.want, gen.replaceInitialism(tt.args.s), "replaceInitialism(%v)", tt.args.s)
 		})
 	}
 }

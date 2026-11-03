@@ -17,11 +17,11 @@ type ResolvedName struct {
 
 // ResolveNames takes the gathered schemas and assigns unique Go type names to each.
 // It returns a map from the schema's path string to the resolved Go type name.
-func ResolveNames(schemas []*GatheredSchema) map[string]string {
+func (g *state) ResolveNames(schemas []*GatheredSchema) map[string]string {
 	// Step 1: Generate candidate names for all schemas
 	candidates := make([]*ResolvedName, len(schemas))
 	for i, s := range schemas {
-		candidate := generateCandidateName(s)
+		candidate := g.generateCandidateName(s)
 		candidates[i] = &ResolvedName{
 			Schema:    s,
 			GoName:    candidate,
@@ -31,7 +31,7 @@ func ResolveNames(schemas []*GatheredSchema) map[string]string {
 	}
 
 	// Step 2: Resolve collisions iteratively
-	resolveCollisions(candidates)
+	g.resolveCollisions(candidates)
 
 	// Step 3: Build the result map
 	result := make(map[string]string, len(candidates))
@@ -43,53 +43,53 @@ func ResolveNames(schemas []*GatheredSchema) map[string]string {
 
 // generateCandidateName produces an initial Go type name candidate based on
 // the schema's location and context in the OpenAPI document.
-func generateCandidateName(s *GatheredSchema) string {
+func (g *state) generateCandidateName(s *GatheredSchema) string {
 	if s.GoNameOverride != "" {
 		return s.GoNameOverride
 	}
 
 	switch s.Context {
 	case ContextComponentSchema:
-		return SchemaNameToTypeName(s.ComponentName)
+		return g.SchemaNameToTypeName(s.ComponentName)
 
 	case ContextComponentParameter:
-		return SchemaNameToTypeName(s.ComponentName)
+		return g.SchemaNameToTypeName(s.ComponentName)
 
 	case ContextComponentResponse:
-		return SchemaNameToTypeName(s.ComponentName)
+		return g.SchemaNameToTypeName(s.ComponentName)
 
 	case ContextComponentRequestBody:
-		return SchemaNameToTypeName(s.ComponentName)
+		return g.SchemaNameToTypeName(s.ComponentName)
 
 	case ContextComponentHeader:
-		return SchemaNameToTypeName(s.ComponentName)
+		return g.SchemaNameToTypeName(s.ComponentName)
 
 	case ContextClientResponseWrapper:
 		// Client response wrappers use: OperationId + responseTypeSuffix
-		return fmt.Sprintf("%s%s", SchemaNameToTypeName(s.OperationID), responseTypeSuffix)
+		return fmt.Sprintf("%s%s", g.SchemaNameToTypeName(s.OperationID), g.responseTypeSuffix)
 
 	case ContextOperationParameter:
 		if s.OperationID != "" {
-			return SchemaNameToTypeName(s.OperationID) + "Parameter"
+			return g.SchemaNameToTypeName(s.OperationID) + "Parameter"
 		}
-		return SchemaNameToTypeName(s.ComponentName) + "Parameter"
+		return g.SchemaNameToTypeName(s.ComponentName) + "Parameter"
 
 	case ContextOperationRequestBody:
 		if s.OperationID != "" {
-			ct := contentTypeSuffix(s.ContentType)
-			return SchemaNameToTypeName(s.OperationID) + ct + "Request"
+			ct := g.contentTypeSuffix(s.ContentType)
+			return g.SchemaNameToTypeName(s.OperationID) + ct + "Request"
 		}
-		return SchemaNameToTypeName(s.ComponentName) + "Request"
+		return g.SchemaNameToTypeName(s.ComponentName) + "Request"
 
 	case ContextOperationResponse:
 		if s.OperationID != "" {
-			ct := contentTypeSuffix(s.ContentType)
-			return SchemaNameToTypeName(s.OperationID) + s.StatusCode + ct + "Response"
+			ct := g.contentTypeSuffix(s.ContentType)
+			return g.SchemaNameToTypeName(s.OperationID) + s.StatusCode + ct + "Response"
 		}
-		return SchemaNameToTypeName(s.ComponentName) + "Response"
+		return g.SchemaNameToTypeName(s.ComponentName) + "Response"
 
 	default:
-		return SchemaNameToTypeName(s.ComponentName)
+		return g.SchemaNameToTypeName(s.ComponentName)
 	}
 }
 
@@ -103,10 +103,10 @@ func generateCandidateName(s *GatheredSchema) string {
 // re-checked globally before moving to the next strategy. This prevents
 // oscillation between strategies (e.g., context suffix and content type
 // suffix repeatedly appending to the same names without resolution).
-func resolveCollisions(names []*ResolvedName) {
+func (s *state) resolveCollisions(names []*ResolvedName) {
 	strategies := []func([]*ResolvedName) bool{
 		strategyContextSuffix,
-		strategyPerSchemaDisambiguate,
+		s.strategyPerSchemaDisambiguate,
 		strategyNumericFallback,
 	}
 
@@ -188,8 +188,8 @@ func strategyContextSuffix(group []*ResolvedName) bool {
 
 // strategyPerSchemaDisambiguate tries several per-schema disambiguation strategies.
 // Returns true if any name was modified, false if no progress was made.
-func strategyPerSchemaDisambiguate(group []*ResolvedName) bool {
-	progress := tryContentTypeSuffix(group)
+func (s *state) strategyPerSchemaDisambiguate(group []*ResolvedName) bool {
+	progress := s.tryContentTypeSuffix(group)
 	if !progress && tryStatusCodeSuffix(group) {
 		progress = true
 	}
@@ -202,7 +202,7 @@ func strategyPerSchemaDisambiguate(group []*ResolvedName) bool {
 // tryContentTypeSuffix appends a content type discriminator when schemas
 // differ by media type (e.g., JSON vs XML).
 // Returns true if any name was modified, false if no progress was made.
-func tryContentTypeSuffix(group []*ResolvedName) bool {
+func (s *state) tryContentTypeSuffix(group []*ResolvedName) bool {
 	// Check if any members have different content types
 	contentTypes := make(map[string]bool)
 	for _, n := range group {
@@ -222,7 +222,7 @@ func tryContentTypeSuffix(group []*ResolvedName) bool {
 		if n.Schema.ContentType == "" {
 			continue
 		}
-		suffix := contentTypeSuffix(n.Schema.ContentType)
+		suffix := s.contentTypeSuffix(n.Schema.ContentType)
 		if suffix != "" && !strings.HasSuffix(n.GoName, suffix) {
 			n.GoName = n.GoName + suffix
 			progress = true
@@ -315,7 +315,7 @@ func strategyNumericFallback(group []*ResolvedName) bool {
 }
 
 // contentTypeSuffix returns a short suffix for a media type.
-func contentTypeSuffix(ct string) string {
+func (s *state) contentTypeSuffix(ct string) string {
 	if ct == "" {
 		return ""
 	}
@@ -334,6 +334,6 @@ func contentTypeSuffix(ct string) string {
 	case strings.Contains(ct, "yaml"):
 		return "YAML"
 	default:
-		return mediaTypeToCamelCase(ct)
+		return s.mediaTypeToCamelCase(ct)
 	}
 }

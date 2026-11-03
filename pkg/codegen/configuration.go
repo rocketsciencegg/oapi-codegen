@@ -568,6 +568,17 @@ func (oo OutputOptions) Validate() map[string]string {
 	return nil
 }
 
+func (s *state) streamingContentTypes() ([]*regexp.Regexp, error) {
+	if s.streamingContentTypeRegexes == nil {
+		patterns, err := compileStreamingContentTypes(s.options.OutputOptions.StreamingContentTypes)
+		if err != nil {
+			return nil, err
+		}
+		s.streamingContentTypeRegexes = patterns
+	}
+	return s.streamingContentTypeRegexes, nil
+}
+
 // compileStreamingContentTypes returns the merged default + user-provided
 // patterns compiled into regexes. The first compile error is returned
 // including the offending pattern.

@@ -34,7 +34,6 @@ var (
 	pathParamRE    *regexp.Regexp
 	predeclaredSet map[string]struct{}
 	separatorSet   map[rune]struct{}
-	nameNormalizer NameNormalizer = ToCamelCase
 )
 
 type NameNormalizerFunction string
@@ -91,14 +90,16 @@ func (m NameNormalizerMap) Options() []string {
 // NameNormalizers contains the valid options for `NameNormalizerFunction`s that `oapi-codegen` supports.
 //
 // If you are calling `oapi-codegen` as a library, this allows you to specify your own normalisation types before generating code.
-var NameNormalizers = NameNormalizerMap{
-	NameNormalizerFunctionUnset:                      ToCamelCase,
-	NameNormalizerFunctionToCamelCase:                ToCamelCase,
-	NameNormalizerFunctionToCamelCaseWithDigits:      ToCamelCaseWithDigits,
-	NameNormalizerFunctionToCamelCaseWithInitialisms: ToCamelCaseWithInitialisms,
-}
+// Configure it before concurrent use; generation reads but does not modify it.
+var NameNormalizers NameNormalizerMap
 
 func init() {
+	NameNormalizers = NameNormalizerMap{
+		NameNormalizerFunctionUnset:                      ToCamelCase,
+		NameNormalizerFunctionToCamelCase:                ToCamelCase,
+		NameNormalizerFunctionToCamelCaseWithDigits:      ToCamelCaseWithDigits,
+		NameNormalizerFunctionToCamelCaseWithInitialisms: ToCamelCaseWithInitialisms,
+	}
 	pathParamRE = regexp.MustCompile(`{[.;?]?([^{}*]+)\*?}`)
 
 	predeclaredIdentifiers := []string{
@@ -282,10 +283,10 @@ func ToCamelCaseWithDigits(s string) string {
 
 // ToCamelCaseWithInitialisms function will convert query-arg style strings to CamelCase with initialisms in uppercase.
 // So, httpOperationId would be converted to HTTPOperationID
-func ToCamelCaseWithInitialisms(s string) string {
+func (g *state) ToCamelCaseWithInitialisms(s string) string {
 	parts := camelCaseMatchParts.FindAllString(ToCamelCaseWithDigits(s), -1)
 	for i := range parts {
-		if v, ok := globalState.initialismsMap[strings.ToLower(parts[i])]; ok {
+		if v, ok := g.initialismsMap[strings.ToLower(parts[i])]; ok {
 			parts[i] = v
 		}
 	}
@@ -300,11 +301,8 @@ var initialismsList = []string{
 	"URI", "URL", "UTF8", "VM", "XML", "XMPP", "XSRF", "XSS", "SIP", "RTP", "AMQP", "DB", "TS",
 }
 
-// targetWordRegex is a regex that matches all initialisms.
-var targetWordRegex *regexp.Regexp
-
-func makeInitialismsMap(additionalInitialisms []string) map[string]string {
-	l := append(initialismsList, additionalInitialisms...)
+func (s *state) makeInitialismsMap(additionalInitialisms []string) map[string]string {
+	l := append(slices.Clone(initialismsList), additionalInitialisms...)
 
 	m := make(map[string]string, len(l))
 	for i := range l {
@@ -312,19 +310,20 @@ func makeInitialismsMap(additionalInitialisms []string) map[string]string {
 	}
 
 	// Create a regex to match the initialisms
-	targetWordRegex = regexp.MustCompile(`(?i)(` + strings.Join(l, "|") + `)`)
+	s.targetWordRegex = regexp.MustCompile(`(?i)(` + strings.Join(l, "|") + `)`)
 
 	return m
 }
 
-func ToCamelCaseWithInitialism(str string) string {
-	return replaceInitialism(ToCamelCase(str))
+// ToCamelCaseWithInitialism converts str to camel case and capitalizes recognized initialisms.
+func (s *state) ToCamelCaseWithInitialism(str string) string {
+	return s.replaceInitialism(ToCamelCase(str))
 }
 
-func replaceInitialism(s string) string {
+func (g *state) replaceInitialism(s string) string {
 	// These strings do not apply CamelCase
 	// Do not do CamelCase when these characters match when the preceding character is lowercase
-	return targetWordRegex.ReplaceAllStringFunc(s, func(s string) string {
+	return g.targetWordRegex.ReplaceAllStringFunc(s, func(s string) string {
 		// If the preceding character is lowercase, do not do CamelCase
 		if unicode.IsLower(rune(s[0])) {
 			return s
@@ -334,14 +333,14 @@ func replaceInitialism(s string) string {
 }
 
 // mediaTypeToCamelCase converts a media type to a PascalCase representation
-func mediaTypeToCamelCase(s string) string {
+func (g *state) mediaTypeToCamelCase(s string) string {
 	// ToCamelCase doesn't - and won't - add `/` to the characters it'll allow word boundary
 	s = strings.Replace(s, "/", "_", 1)
 	// including a _ to make sure that these are treated as word boundaries by `ToCamelCase`
 	s = strings.Replace(s, "*", "Wildcard_", 1)
 	s = strings.Replace(s, "+", "Plus_", 1)
 
-	return ToCamelCaseWithInitialism(s)
+	return g.ToCamelCaseWithInitialism(s)
 }
 
 // SortedMapKeys takes a map with keys of type string and returns a slice of those
@@ -437,35 +436,35 @@ func RefPathToObjName(refPath string) string {
 // Remote components (document.json#/Foo) are supported if they present in --import-mapping
 // URL components (http://deepmap.com/schemas/document.json#/Foo) are supported if they present in --import-mapping
 // Remote and URL also support standard local paths even though the spec doesn't mention them.
-func RefPathToGoType(refPath string) (string, error) {
-	return refPathToGoType(refPath, true)
+func (s *state) RefPathToGoType(refPath string) (string, error) {
+	return s.refPathToGoType(refPath, true)
 }
 
 // refPathToGoType returns the Go typename for refPath given its
-func refPathToGoType(refPath string, local bool) (string, error) {
+func (s *state) refPathToGoType(refPath string, local bool) (string, error) {
 	if refPath[0] == '#' {
-		return refPathToGoTypeSelf(refPath, local)
+		return s.refPathToGoTypeSelf(refPath, local)
 	}
 	pathParts := strings.Split(refPath, "#")
 	if len(pathParts) != 2 {
 		return "", fmt.Errorf("unsupported reference: %s", refPath)
 	}
 	remoteComponent, flatComponent := pathParts[0], pathParts[1]
-	goPkg, ok := globalState.importMapping[remoteComponent]
+	goPkg, ok := s.importMapping[remoteComponent]
 
 	if !ok {
 		return "", fmt.Errorf("unrecognized external reference '%s'; please provide the known import for this reference using option --import-mapping", remoteComponent)
 	}
 
 	if goPkg.Path == importMappingCurrentPackage {
-		return refPathToGoTypeSelf(fmt.Sprintf("#%s", pathParts[1]), local)
+		return s.refPathToGoTypeSelf(fmt.Sprintf("#%s", pathParts[1]), local)
 	}
 
-	return refPathToGoTypeRemote(flatComponent, goPkg)
+	return s.refPathToGoTypeRemote(flatComponent, goPkg)
 
 }
 
-func refPathToGoTypeSelf(refPath string, local bool) (string, error) {
+func (s *state) refPathToGoTypeSelf(refPath string, local bool) (string, error) {
 	pathParts := strings.Split(refPath, "/")
 	depth := len(pathParts)
 	if local {
@@ -485,14 +484,14 @@ func refPathToGoTypeSelf(refPath string, local bool) (string, error) {
 	// a response both claim "Thing", the component schema keeps the original
 	// name and the response becomes "ThingResponse".
 	if depth == 4 && pathParts[0] == "#" && pathParts[1] == "components" {
-		if resolved := resolvedNameForComponent(pathParts[2], pathParts[3]); resolved != "" {
+		if resolved := s.resolvedNameForComponent(pathParts[2], pathParts[3]); resolved != "" {
 			return resolved, nil
 		}
 	}
 
 	// Schemas may have been renamed locally, so look up the actual name in
 	// the spec.
-	name, err := findSchemaNameByRefPath(refPath, globalState.spec)
+	name, err := s.findSchemaNameByRefPath(refPath, s.spec)
 	if err != nil {
 		return "", fmt.Errorf("error finding ref: %s in spec: %v", refPath, err)
 	}
@@ -502,11 +501,11 @@ func refPathToGoTypeSelf(refPath string, local bool) (string, error) {
 	// lastPart now stores the final element of the type path. This is what
 	// we use as the base for a type name.
 	lastPart := pathParts[len(pathParts)-1]
-	return SchemaNameToTypeName(lastPart), nil
+	return s.SchemaNameToTypeName(lastPart), nil
 }
 
-func refPathToGoTypeRemote(flatComponent string, goPkg goImport) (string, error) {
-	goType, err := refPathToGoType("#"+flatComponent, false)
+func (s *state) refPathToGoTypeRemote(flatComponent string, goPkg goImport) (string, error) {
+	goType, err := s.refPathToGoType("#"+flatComponent, false)
 	if err != nil {
 		return "", err
 	}
@@ -517,7 +516,7 @@ func refPathToGoTypeRemote(flatComponent string, goPkg goImport) (string, error)
 // #/components/schemas/Foo                     -> true
 // ./local/file.yml#/components/parameters/Bar  -> true
 // ./local/file.yml                             -> false
-// IsGoTypeReference can be used to check whether RefPathToGoType($ref) is possible.
+// IsGoTypeReference can be used to check whether s.RefPathToGoType($ref) is possible.
 func IsGoTypeReference(ref string) bool {
 	return ref != "" && !IsWholeDocumentReference(ref)
 }
@@ -816,7 +815,7 @@ func SanitizeGoIdentity(str string) string {
 
 // SanitizeEnumNames fixes illegal chars in the enum names
 // and removes duplicates
-func SanitizeEnumNames(enumNames, enumValues []string) map[string]string {
+func (s *state) SanitizeEnumNames(enumNames, enumValues []string) map[string]string {
 	dupCheck := make(map[string]int, len(enumValues))
 	deDup := make([][]string, 0, len(enumValues))
 
@@ -836,7 +835,7 @@ func SanitizeEnumNames(enumNames, enumValues []string) map[string]string {
 
 	for _, p := range deDup {
 		n, v := p[0], p[1]
-		sanitized := SanitizeGoIdentity(SchemaNameToTypeName(n))
+		sanitized := SanitizeGoIdentity(s.SchemaNameToTypeName(n))
 
 		if _, dup := dupCheck[sanitized]; !dup {
 			sanitizedDeDup[sanitized] = v
@@ -903,8 +902,8 @@ func typeNamePrefix(name string) (prefix string) {
 
 // SchemaNameToTypeName converts a Schema name to a valid Go type name. It converts to camel case, and makes sure the name is
 // valid in Go
-func SchemaNameToTypeName(name string) string {
-	return typeNamePrefix(name) + nameNormalizer(name)
+func (s *state) SchemaNameToTypeName(name string) string {
+	return typeNamePrefix(name) + s.nameNormalizer(name)
 }
 
 // According to the spec, additionalProperties may be true, false, or a
@@ -926,9 +925,9 @@ func SchemaHasAdditionalProperties(schema *openapi3.Schema) bool {
 
 // PathToTypeName converts a path, like Object/field1/nestedField into a go
 // type name.
-func PathToTypeName(path []string) string {
+func (s *state) PathToTypeName(path []string) string {
 	for i, p := range path {
-		path[i] = nameNormalizer(p)
+		path[i] = s.nameNormalizer(p)
 	}
 	return strings.Join(path, "_")
 }
@@ -1010,10 +1009,10 @@ func EscapePathElements(path string) string {
 // and the definition of the schema. If the schema overrides the name via
 // x-go-name, the new name is returned, otherwise, the original name is
 // returned.
-func renameSchema(schemaName string, schemaRef *openapi3.SchemaRef) (string, error) {
+func (s *state) renameSchema(schemaName string, schemaRef *openapi3.SchemaRef) (string, error) {
 	// References will not change type names.
 	if schemaRef.Ref != "" {
-		return SchemaNameToTypeName(schemaName), nil
+		return s.SchemaNameToTypeName(schemaName), nil
 	}
 	schema := schemaRef.Value
 
@@ -1024,14 +1023,14 @@ func renameSchema(schemaName string, schemaRef *openapi3.SchemaRef) (string, err
 		}
 		return typeName, nil
 	}
-	return SchemaNameToTypeName(schemaName), nil
+	return s.SchemaNameToTypeName(schemaName), nil
 }
 
 // renameParameter generates the name for a parameter, taking x-go-name into
 // account
-func renameParameter(parameterName string, parameterRef *openapi3.ParameterRef) (string, error) {
+func (s *state) renameParameter(parameterName string, parameterRef *openapi3.ParameterRef) (string, error) {
 	if parameterRef.Ref != "" {
-		return SchemaNameToTypeName(parameterName), nil
+		return s.SchemaNameToTypeName(parameterName), nil
 	}
 	parameter := parameterRef.Value
 
@@ -1042,14 +1041,14 @@ func renameParameter(parameterName string, parameterRef *openapi3.ParameterRef) 
 		}
 		return typeName, nil
 	}
-	return SchemaNameToTypeName(parameterName), nil
+	return s.SchemaNameToTypeName(parameterName), nil
 }
 
 // renameResponse generates the name for a parameter, taking x-go-name into
 // account
-func renameResponse(responseName string, responseRef *openapi3.ResponseRef) (string, error) {
+func (s *state) renameResponse(responseName string, responseRef *openapi3.ResponseRef) (string, error) {
 	if responseRef.Ref != "" {
-		return SchemaNameToTypeName(responseName), nil
+		return s.SchemaNameToTypeName(responseName), nil
 	}
 	response := responseRef.Value
 
@@ -1060,14 +1059,14 @@ func renameResponse(responseName string, responseRef *openapi3.ResponseRef) (str
 		}
 		return typeName, nil
 	}
-	return SchemaNameToTypeName(responseName), nil
+	return s.SchemaNameToTypeName(responseName), nil
 }
 
 // renameRequestBody generates the name for a parameter, taking x-go-name into
 // account
-func renameRequestBody(requestBodyName string, requestBodyRef *openapi3.RequestBodyRef) (string, error) {
+func (s *state) renameRequestBody(requestBodyName string, requestBodyRef *openapi3.RequestBodyRef) (string, error) {
 	if requestBodyRef.Ref != "" {
-		return SchemaNameToTypeName(requestBodyName), nil
+		return s.SchemaNameToTypeName(requestBodyName), nil
 	}
 	requestBody := requestBodyRef.Value
 
@@ -1078,14 +1077,14 @@ func renameRequestBody(requestBodyName string, requestBodyRef *openapi3.RequestB
 		}
 		return typeName, nil
 	}
-	return SchemaNameToTypeName(requestBodyName), nil
+	return s.SchemaNameToTypeName(requestBodyName), nil
 }
 
 // findSchemaByRefPath turns a $ref path into a schema. This will return ""
 // if the schema wasn't found, and it'll only work successfully for schemas
 // defined within the spec that we parsed.
-func findSchemaNameByRefPath(refPath string, spec *openapi3.T) (string, error) {
-	if spec.Components == nil {
+func (s *state) findSchemaNameByRefPath(refPath string, spec *openapi3.T) (string, error) {
+	if spec == nil || spec.Components == nil {
 		return "", nil
 	}
 	pathElements := strings.Split(refPath, "/")
@@ -1106,19 +1105,19 @@ func findSchemaNameByRefPath(refPath string, spec *openapi3.T) (string, error) {
 	switch pathElements[2] {
 	case "schemas":
 		if schema, found := spec.Components.Schemas[propertyName]; found {
-			return renameSchema(propertyName, schema)
+			return s.renameSchema(propertyName, schema)
 		}
 	case "parameters":
 		if parameter, found := spec.Components.Parameters[propertyName]; found {
-			return renameParameter(propertyName, parameter)
+			return s.renameParameter(propertyName, parameter)
 		}
 	case "responses":
 		if response, found := spec.Components.Responses[propertyName]; found {
-			return renameResponse(propertyName, response)
+			return s.renameResponse(propertyName, response)
 		}
 	case "requestBodies":
 		if requestBody, found := spec.Components.RequestBodies[propertyName]; found {
-			return renameRequestBody(propertyName, requestBody)
+			return s.renameRequestBody(propertyName, requestBody)
 		}
 	}
 	return "", nil

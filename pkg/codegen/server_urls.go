@@ -101,7 +101,7 @@ func (s ServerObjectDefinition) UndeclaredPlaceholders() []string {
 // stable, deterministically-named ServerObjectDefinitions for `spec`.
 // Used by both BuildServerURLTypeDefinitions and GenerateServerURLs so
 // they generate identifiers that match.
-func serverObjectDefinitions(spec *openapi3.T) ([]ServerObjectDefinition, error) {
+func (s *state) serverObjectDefinitions(spec *openapi3.T) ([]ServerObjectDefinition, error) {
 	names := make(map[string]*openapi3.Server)
 
 	for _, server := range spec.Servers {
@@ -118,10 +118,10 @@ func serverObjectDefinitions(spec *openapi3.T) ([]ServerObjectDefinition, error)
 		if name == "" {
 			suffix := server.Description
 			if suffix == "" {
-				suffix = nameNormalizer(server.URL)
+				suffix = s.nameNormalizer(server.URL)
 			}
 			name = serverURLPrefix + UppercaseFirstCharacter(suffix)
-			name = nameNormalizer(name)
+			name = s.nameNormalizer(name)
 		}
 
 		// if this is the only type with this name, store it
@@ -339,8 +339,8 @@ func (s ServerObjectDefinition) EnumDefaultPointers() []ServerURLDefaultPointer 
 // continues to emit their `type` and (optional) default constant
 // inline, since the generic enum path has nothing to contribute for a
 // non-enum string.
-func BuildServerURLTypeDefinitions(spec *openapi3.T) ([]TypeDefinition, error) {
-	servers, err := serverObjectDefinitions(spec)
+func (s *state) BuildServerURLTypeDefinitions(spec *openapi3.T) ([]TypeDefinition, error) {
+	servers, err := s.serverObjectDefinitions(spec)
 	if err != nil {
 		return nil, err
 	}
@@ -379,10 +379,10 @@ func BuildServerURLTypeDefinitions(spec *openapi3.T) ([]TypeDefinition, error) {
 			}
 			typeName := serverURLVariableTypeName(srv.GoName, varName)
 			enumValues := serverURLEnumValues(v)
-			defs = append(defs, TypeDefinition{
+			defs = append(defs, TypeDefinition{gen: s,
 				TypeName: typeName,
 				JsonName: varName,
-				Schema: Schema{
+				Schema: Schema{gen: s,
 					GoType:      "string",
 					EnumValues:  enumValues,
 					Description: v.Description,
@@ -394,8 +394,9 @@ func BuildServerURLTypeDefinitions(spec *openapi3.T) ([]TypeDefinition, error) {
 	return defs, nil
 }
 
-func GenerateServerURLs(t *template.Template, spec *openapi3.T) (string, error) {
-	servers, err := serverObjectDefinitions(spec)
+// GenerateServerURLs renders server URL constants and variable expansion helpers.
+func (s *state) GenerateServerURLs(t *template.Template, spec *openapi3.T) (string, error) {
+	servers, err := s.serverObjectDefinitions(spec)
 	if err != nil {
 		return "", err
 	}

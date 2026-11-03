@@ -12,20 +12,20 @@ import (
 
 // MergeSchemas merges all the fields in the schemas supplied into one giant schema.
 // The idea is that we merge all fields together into one schema.
-func MergeSchemas(allOf []*openapi3.SchemaRef, path []string) (Schema, error) {
+func (s *state) MergeSchemas(allOf []*openapi3.SchemaRef, path []string) (Schema, error) {
 	// If someone asked for the old way, for backward compatibility, return the
 	// old style result.
-	if globalState.options.Compatibility.OldMergeSchemas {
-		return mergeSchemasV1(allOf, path)
+	if s.options.Compatibility.OldMergeSchemas {
+		return s.mergeSchemasV1(allOf, path)
 	}
-	return mergeSchemas(allOf, path)
+	return s.mergeSchemas(allOf, path)
 }
 
-func mergeSchemas(allOf []*openapi3.SchemaRef, path []string) (Schema, error) {
+func (s *state) mergeSchemas(allOf []*openapi3.SchemaRef, path []string) (Schema, error) {
 	n := len(allOf)
 
 	if n == 1 {
-		return GenerateGoSchema(allOf[0], path)
+		return s.GenerateGoSchema(allOf[0], path)
 	}
 
 	// Distinguish two uses of allOf:
@@ -84,7 +84,7 @@ func mergeSchemas(allOf []*openapi3.SchemaRef, path []string) (Schema, error) {
 			seenSchemaRef[allOf[i].Ref] = true
 			seenTopLevel[allOf[i].Ref] = true
 		}
-		schema, err = mergeOpenapiSchemas(schema, oneOfSchema, true, seenSchemaRef)
+		schema, err = s.mergeOpenapiSchemas(schema, oneOfSchema, true, seenSchemaRef)
 		if err != nil {
 			return Schema{}, fmt.Errorf("error merging schemas for AllOf: %w", err)
 		}
@@ -109,7 +109,7 @@ func mergeSchemas(allOf []*openapi3.SchemaRef, path []string) (Schema, error) {
 		schema.Extensions = ext
 	}
 
-	return GenerateGoSchema(openapi3.NewSchemaRef("", &schema), path)
+	return s.GenerateGoSchema(openapi3.NewSchemaRef("", &schema), path)
 }
 
 // isExtensionOnlySchema reports whether a schema carries only extensions,
@@ -223,7 +223,7 @@ func propagateRemoteRefs(remoteComponent string, schema *openapi3.Schema) {
 	}
 }
 
-func mergeAllOf(allOf []*openapi3.SchemaRef, seenSchemaRef map[string]bool) (openapi3.Schema, error) {
+func (s *state) mergeAllOf(allOf []*openapi3.SchemaRef, seenSchemaRef map[string]bool) (openapi3.Schema, error) {
 	var schema openapi3.Schema
 	for _, schemaRef := range allOf {
 		var err error
@@ -240,7 +240,7 @@ func mergeAllOf(allOf []*openapi3.SchemaRef, seenSchemaRef map[string]bool) (ope
 		if err != nil {
 			return openapi3.Schema{}, err
 		}
-		schema, err = mergeOpenapiSchemas(schema, member, true, seenSchemaRef)
+		schema, err = s.mergeOpenapiSchemas(schema, member, true, seenSchemaRef)
 		if err != nil {
 			return openapi3.Schema{}, fmt.Errorf("error merging schemas for AllOf: %w", err)
 		}
@@ -250,7 +250,7 @@ func mergeAllOf(allOf []*openapi3.SchemaRef, seenSchemaRef map[string]bool) (ope
 
 // mergeOpenapiSchemas merges two openAPI schemas and returns the schema
 // all of whose fields are composed.
-func mergeOpenapiSchemas(s1, s2 openapi3.Schema, allOf bool, seenSchemaRef map[string]bool) (openapi3.Schema, error) {
+func (s *state) mergeOpenapiSchemas(s1, s2 openapi3.Schema, allOf bool, seenSchemaRef map[string]bool) (openapi3.Schema, error) {
 	var result openapi3.Schema
 
 	result.Extensions = make(map[string]any, len(s1.Extensions)+len(s2.Extensions))
@@ -269,7 +269,7 @@ func mergeOpenapiSchemas(s1, s2 openapi3.Schema, allOf bool, seenSchemaRef map[s
 	var err error
 	if s1.AllOf != nil {
 		var merged openapi3.Schema
-		merged, err = mergeAllOf(s1.AllOf, seenSchemaRef)
+		merged, err = s.mergeAllOf(s1.AllOf, seenSchemaRef)
 		if err != nil {
 			return openapi3.Schema{}, fmt.Errorf("error transitive merging AllOf on schema 1")
 		}
@@ -279,7 +279,7 @@ func mergeOpenapiSchemas(s1, s2 openapi3.Schema, allOf bool, seenSchemaRef map[s
 	}
 	if s2.AllOf != nil {
 		var merged openapi3.Schema
-		merged, err = mergeAllOf(s2.AllOf, seenSchemaRef)
+		merged, err = s.mergeAllOf(s2.AllOf, seenSchemaRef)
 		if err != nil {
 			return openapi3.Schema{}, fmt.Errorf("error transitive merging AllOf on schema 2")
 		}
@@ -371,7 +371,7 @@ func mergeOpenapiSchemas(s1, s2 openapi3.Schema, allOf bool, seenSchemaRef map[s
 	// indistinguishable from an explicit `nullable: false`; erroring on a
 	// mismatch made this widely-used idiom unusable. Union is also
 	// consistent with how Required is merged below.
-	if schemaIsNullable(&s1) || schemaIsNullable(&s2) {
+	if s.schemaIsNullable(&s1) || s.schemaIsNullable(&s2) {
 		result.Nullable = true
 	}
 
