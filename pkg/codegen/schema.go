@@ -728,12 +728,12 @@ func (s *state) schemaPrimaryType(t *openapi3.Types) *openapi3.Types {
 	if t == nil || !s.is31 {
 		return t
 	}
-	schema := t.Slice()
-	if len(schema) <= 1 {
+	types := t.Slice()
+	if len(types) <= 1 {
 		return t
 	}
-	stripped := make(openapi3.Types, 0, len(schema))
-	for _, name := range schema {
+	stripped := make(openapi3.Types, 0, len(types))
+	for _, name := range types {
 		if name != "null" {
 			stripped = append(stripped, name)
 		}

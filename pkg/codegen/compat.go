@@ -6,32 +6,15 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
+// MergeSchemas merges all the fields in the supplied schemas into one schema.
 func MergeSchemas(allOf []*openapi3.SchemaRef, path []string) (Schema, error) {
 	return newDefaultState().MergeSchemas(allOf, path)
 }
 
-func mergeSchemas(allOf []*openapi3.SchemaRef, path []string) (Schema, error) {
-	return newDefaultState().mergeSchemas(allOf, path)
-}
-
+// GenStructFromAllOf generates a struct combining the supplied schemas,
+// embedding referenced types and inlining fields from inline schemas.
 func GenStructFromAllOf(allOf []*openapi3.SchemaRef, path []string) (string, error) {
 	return newDefaultState().GenStructFromAllOf(allOf, path)
-}
-
-func mergeAllOf(allOf []*openapi3.SchemaRef, seenSchemaRef map[string]bool) (openapi3.Schema, error) {
-	return newDefaultState().mergeAllOf(allOf, seenSchemaRef)
-}
-
-func mergeOpenapiSchemas(s1, s2 openapi3.Schema, allOf bool, seenSchemaRef map[string]bool) (openapi3.Schema, error) {
-	return newDefaultState().mergeOpenapiSchemas(s1, s2, allOf, seenSchemaRef)
-}
-
-func generateUnion(outSchema *Schema, elements openapi3.SchemaRefs, discriminator *openapi3.Discriminator, path []string) error {
-	return generationOrDefault(outSchema.gen).generateUnion(outSchema, elements, discriminator, path)
-}
-
-func allOfMergesUnions() bool {
-	return newDefaultState().allOfMergesUnions()
 }
 
 // genResponsePayload generates the payload returned at the end of each client request function

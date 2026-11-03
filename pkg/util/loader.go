@@ -26,7 +26,7 @@ func loadSwagger(filePath string, allowRemoteRefsFrom []string, client *http.Cli
 }
 
 func loadSwaggerWithBaseDir(filePath, baseDir string, allowRemoteRefsFrom []string, client *http.Client) (*openapi3.T, error) {
-	loader := newLoaderWithBaseDir(filePath, baseDir, allowRemoteRefsFrom, client)
+	loader := newLoader(filePath, baseDir, allowRemoteRefsFrom, client)
 	if u := specURL(filePath); u != nil {
 		return loader.LoadFromURI(u)
 	}
@@ -48,11 +48,7 @@ func specURL(filePath string) *url.URL {
 // allowRemoteRefsFrom. When filePath is itself a URL, the document is fetched
 // through the same reader, so that one URL is allowed as well: the caller
 // named it.
-func newLoader(filePath string, allowRemoteRefsFrom []string, client *http.Client) *openapi3.Loader {
-	return newLoaderWithBaseDir(filePath, "", allowRemoteRefsFrom, client)
-}
-
-func newLoaderWithBaseDir(filePath, baseDir string, allowRemoteRefsFrom []string, client *http.Client) *openapi3.Loader {
+func newLoader(filePath, baseDir string, allowRemoteRefsFrom []string, client *http.Client) *openapi3.Loader {
 	if allowRemoteRefsFrom == nil {
 		// On the 2.8 release line an unset list keeps the behaviour of earlier
 		// releases, which followed every remote reference. An explicit empty
@@ -82,7 +78,7 @@ func newLoaderWithBaseDir(filePath, baseDir string, allowRemoteRefsFrom []string
 	return loader
 }
 
-// localRefReader scopes physical reads without changing the document URLs
+// localRefReader resolves relative reads against baseDir without changing the document URLs
 // kin-openapi uses to resolve references and name bundled schemas.
 func localRefReader(baseDir string) openapi3.ReadFromURIFunc {
 	return func(loader *openapi3.Loader, location *url.URL) ([]byte, error) {
@@ -153,6 +149,7 @@ type LoadSwaggerWithOverlayOpts struct {
 	// reads without changing their logical document URLs or the process's
 	// working directory. Empty uses the current working directory.
 	// Absolute local paths and remote URLs are unaffected.
+	// This is not a security boundary: relative paths may traverse outside BaseDir.
 	BaseDir string
 	// AllowRemoteRefsFrom lists the remote document URLs that external $refs
 	// may be fetched from, see RemoteRefAllowed. nil allows every URL, as
@@ -225,7 +222,7 @@ func loadSwaggerWithOverlay(filePath string, opts LoadSwaggerWithOverlayOpts, cl
 	// The same policy as the first load, including the document's own URL,
 	// and the same location, so that relative references in the overlaid
 	// document resolve where they did in the original one.
-	loader := newLoaderWithBaseDir(filePath, opts.BaseDir, opts.AllowRemoteRefsFrom, client)
+	loader := newLoader(filePath, opts.BaseDir, opts.AllowRemoteRefsFrom, client)
 	location := specURL(filePath)
 	if location == nil {
 		location = &url.URL{Path: filepath.ToSlash(filePath)}
