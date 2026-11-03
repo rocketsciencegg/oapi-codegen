@@ -517,8 +517,8 @@ func PropertiesEqual(a, b Property) bool {
 // Cross-version misuse (a 3.1 spec using `nullable: true`, or a 3.0 spec
 // using `type: [..., "null"]`) is documented as invalid input -- this
 // helper trusts its input to use the version-appropriate idiom.
-func (g *state) schemaIsNullable(s *openapi3.Schema) bool {
-	return g.schemaIsNullableRec(s, nil)
+func (s *state) schemaIsNullable(schema *openapi3.Schema) bool {
+	return s.schemaIsNullableRec(schema, nil)
 }
 
 // schemaIsNullableRec is schemaIsNullable's implementation, carrying a
@@ -526,8 +526,8 @@ func (g *state) schemaIsNullable(s *openapi3.Schema) bool {
 // $ref member resolving back to an ancestor — the same cycles
 // mergeOpenapiSchemas guards against) cannot cause unbounded recursion.
 // The set is allocated lazily: the common case (no allOf) never touches it.
-func (g *state) schemaIsNullableRec(s *openapi3.Schema, seen map[*openapi3.Schema]bool) bool {
-	if s == nil {
+func (s *state) schemaIsNullableRec(schema *openapi3.Schema, seen map[*openapi3.Schema]bool) bool {
+	if schema == nil {
 		return false
 	}
 	// A nullable member inside an allOf makes the whole schema nullable.
@@ -541,7 +541,7 @@ func (g *state) schemaIsNullableRec(s *openapi3.Schema, seen map[*openapi3.Schem
 	// branch. mergeOpenapiSchemas unions nullability into the merged type;
 	// this surfaces it at the use site so the field is wrapped in a pointer
 	// / nullable.Nullable[T].
-	for _, member := range s.AllOf {
+	for _, member := range schema.AllOf {
 		if member == nil || member.Value == nil || seen[member.Value] {
 			continue
 		}
@@ -549,12 +549,12 @@ func (g *state) schemaIsNullableRec(s *openapi3.Schema, seen map[*openapi3.Schem
 			seen = make(map[*openapi3.Schema]bool)
 		}
 		seen[member.Value] = true
-		if g.schemaIsNullableRec(member.Value, seen) {
+		if s.schemaIsNullableRec(member.Value, seen) {
 			return true
 		}
 	}
-	if g.is31 {
-		if s.Type != nil && s.Type.Includes("null") {
+	if s.is31 {
+		if schema.Type != nil && schema.Type.Includes("null") {
 			return true
 		}
 		// OpenAPI 3.1 also allows nullability to be expressed via an
@@ -562,19 +562,19 @@ func (g *state) schemaIsNullableRec(s *openapi3.Schema, seen map[*openapi3.Schem
 		// semantically equivalent to including "null" in the outer
 		// type array. Detect it here so downstream code that wraps in a
 		// pointer (or nullable.Nullable[T]) reaches the right decision.
-		for _, branch := range s.AnyOf {
+		for _, branch := range schema.AnyOf {
 			if branch != nil && isNullTypeSchema(branch.Value) {
 				return true
 			}
 		}
-		for _, branch := range s.OneOf {
+		for _, branch := range schema.OneOf {
 			if branch != nil && isNullTypeSchema(branch.Value) {
 				return true
 			}
 		}
 		return false
 	}
-	return s.Nullable
+	return schema.Nullable
 }
 
 // isNullTypeSchema reports whether an OpenAPI 3.1 schema is a bare
@@ -724,16 +724,16 @@ func formatExampleValue(v any) string {
 // the nullability indicator (handled separately by schemaIsNullable); we
 // strip it here so the rest of the codegen can keep dispatching with
 // `Is("...")` as it always has.
-func (g *state) schemaPrimaryType(t *openapi3.Types) *openapi3.Types {
-	if t == nil || !g.is31 {
+func (s *state) schemaPrimaryType(t *openapi3.Types) *openapi3.Types {
+	if t == nil || !s.is31 {
 		return t
 	}
-	s := t.Slice()
-	if len(s) <= 1 {
+	schema := t.Slice()
+	if len(schema) <= 1 {
 		return t
 	}
-	stripped := make(openapi3.Types, 0, len(s))
-	for _, name := range s {
+	stripped := make(openapi3.Types, 0, len(schema))
+	for _, name := range schema {
 		if name != "null" {
 			stripped = append(stripped, name)
 		}
@@ -787,7 +787,8 @@ func (s *state) GenerateGoSchema(sref *openapi3.SchemaRef, path []string) (Schem
 			}
 		}
 
-		return Schema{gen: s,
+		return Schema{
+			gen:                 s,
 			GoType:              refType,
 			Description:         s.describeWithExamples(schema.Description, schema),
 			DefineViaAlias:      true,
@@ -796,7 +797,8 @@ func (s *state) GenerateGoSchema(sref *openapi3.SchemaRef, path []string) (Schem
 		}, nil
 	}
 
-	outSchema := Schema{gen: s,
+	outSchema := Schema{
+		gen:                 s,
 		Description:         s.describeWithExamples(schema.Description, schema),
 		OAPISchema:          schema,
 		SkipOptionalPointer: skipOptionalPointer,
@@ -904,7 +906,8 @@ func (s *state) GenerateGoSchema(sref *openapi3.SchemaRef, path []string) (Schem
 			} else {
 				typeName = s.SchemaNameToTypeName(s.PathToTypeName(path))
 			}
-			typeDef := TypeDefinition{gen: s,
+			typeDef := TypeDefinition{
+				gen:      s,
 				TypeName: typeName,
 				JsonName: strings.Join(path, "."),
 				Schema:   outSchema,
@@ -972,7 +975,8 @@ func (s *state) GenerateGoSchema(sref *openapi3.SchemaRef, path []string) (Schem
 					// to get to the type.
 					typeName := s.PathToTypeName(append(path, "AdditionalProperties"))
 
-					typeDef := TypeDefinition{gen: s,
+					typeDef := TypeDefinition{
+						gen:      s,
 						TypeName: typeName,
 						JsonName: strings.Join(append(path, "AdditionalProperties"), "."),
 						Schema:   additionalSchema,
@@ -1018,7 +1022,8 @@ func (s *state) GenerateGoSchema(sref *openapi3.SchemaRef, path []string) (Schem
 					// to get to the type.
 					typeName := s.PathToTypeName(propertyPath)
 
-					typeDef := TypeDefinition{gen: s,
+					typeDef := TypeDefinition{
+						gen:      s,
 						TypeName: typeName,
 						JsonName: strings.Join(propertyPath, "."),
 						Schema:   pSchema,
@@ -1032,7 +1037,8 @@ func (s *state) GenerateGoSchema(sref *openapi3.SchemaRef, path []string) (Schem
 					description = s.describeWithExamples(p.Value.Description, p.Value)
 				}
 
-				prop := Property{gen: s,
+				prop := Property{
+					gen:           s,
 					JsonFieldName: pName,
 					Schema:        pSchema,
 					Required:      required,
@@ -1080,12 +1086,14 @@ func (s *state) GenerateGoSchema(sref *openapi3.SchemaRef, path []string) (Schem
 				return outSchema, fmt.Errorf("invalid value for %q: %w", extGoTypeName, err)
 			}
 
-			newTypeDef := TypeDefinition{gen: s,
+			newTypeDef := TypeDefinition{
+				gen:      s,
 				TypeName: typeName,
 				JsonName: strings.Join(path, "."),
 				Schema:   outSchema,
 			}
-			outSchema = Schema{gen: s,
+			outSchema = Schema{
+				gen:             s,
 				Description:     newTypeDef.Schema.Description,
 				GoType:          typeName,
 				DefineViaAlias:  true,
@@ -1108,12 +1116,14 @@ func (s *state) GenerateGoSchema(sref *openapi3.SchemaRef, path []string) (Schem
 			!outSchema.DefineViaAlias &&
 			hasInlineStructuralContent(&outSchema) {
 			typeName := s.PathToTypeName(path)
-			typeDef := TypeDefinition{gen: s,
+			typeDef := TypeDefinition{
+				gen:      s,
 				TypeName: typeName,
 				JsonName: strings.Join(path, "."),
 				Schema:   outSchema,
 			}
-			outSchema = Schema{gen: s,
+			outSchema = Schema{
+				gen:         s,
 				Description: typeDef.Schema.Description,
 				GoType:      typeName,
 				// Mark the returned schema as a reference to the
@@ -1200,7 +1210,8 @@ func (s *state) GenerateGoSchema(sref *openapi3.SchemaRef, path []string) (Schem
 				typeName = s.SchemaNameToTypeName(s.PathToTypeName(path))
 			}
 
-			typeDef := TypeDefinition{gen: s,
+			typeDef := TypeDefinition{
+				gen:      s,
 				TypeName: typeName,
 				JsonName: strings.Join(path, "."),
 				Schema:   outSchema,
@@ -1251,7 +1262,8 @@ func (s *state) oapiSchemaToGoType(schema *openapi3.Schema, path []string, outSc
 			// through with their items left anonymous unless we hoist here.
 			typeName := s.PathToTypeName(append(path, "Item"))
 
-			typeDef := TypeDefinition{gen: s,
+			typeDef := TypeDefinition{
+				gen:      s,
 				TypeName: typeName,
 				JsonName: strings.Join(append(path, "Item"), "."),
 				Schema:   arrayType,
@@ -1538,7 +1550,8 @@ func (s *state) paramToGoType(param *openapi3.Parameter, path []string) (Schema,
 	// application/json, but if multiple formats are present, we can't do anything,
 	// so we'll return the parameter as a string, not bothering to decode it.
 	if len(param.Content) > 1 {
-		return Schema{gen: s,
+		return Schema{
+			gen:         s,
 			GoType:      "string",
 			Description: StringToGoComment(param.Description),
 		}, nil
@@ -1548,7 +1561,8 @@ func (s *state) paramToGoType(param *openapi3.Parameter, path []string) (Schema,
 	mt, found := param.Content["application/json"]
 	if !found {
 		// If we don't have json, it's a string
-		return Schema{gen: s,
+		return Schema{
+			gen:         s,
 			GoType:      "string",
 			Description: StringToGoComment(param.Description),
 		}, nil

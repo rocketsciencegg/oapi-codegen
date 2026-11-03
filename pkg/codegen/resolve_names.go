@@ -17,21 +17,21 @@ type ResolvedName struct {
 
 // ResolveNames takes the gathered schemas and assigns unique Go type names to each.
 // It returns a map from the schema's path string to the resolved Go type name.
-func (g *state) ResolveNames(schemas []*GatheredSchema) map[string]string {
+func (s *state) ResolveNames(schemas []*GatheredSchema) map[string]string {
 	// Step 1: Generate candidate names for all schemas
 	candidates := make([]*ResolvedName, len(schemas))
-	for i, s := range schemas {
-		candidate := g.generateCandidateName(s)
+	for i, schema := range schemas {
+		candidate := s.generateCandidateName(schema)
 		candidates[i] = &ResolvedName{
-			Schema:    s,
+			Schema:    schema,
 			GoName:    candidate,
 			Candidate: candidate,
-			Pinned:    s.GoNameOverride != "",
+			Pinned:    schema.GoNameOverride != "",
 		}
 	}
 
 	// Step 2: Resolve collisions iteratively
-	g.resolveCollisions(candidates)
+	s.resolveCollisions(candidates)
 
 	// Step 3: Build the result map
 	result := make(map[string]string, len(candidates))
@@ -43,53 +43,53 @@ func (g *state) ResolveNames(schemas []*GatheredSchema) map[string]string {
 
 // generateCandidateName produces an initial Go type name candidate based on
 // the schema's location and context in the OpenAPI document.
-func (g *state) generateCandidateName(s *GatheredSchema) string {
-	if s.GoNameOverride != "" {
-		return s.GoNameOverride
+func (s *state) generateCandidateName(schema *GatheredSchema) string {
+	if schema.GoNameOverride != "" {
+		return schema.GoNameOverride
 	}
 
-	switch s.Context {
+	switch schema.Context {
 	case ContextComponentSchema:
-		return g.SchemaNameToTypeName(s.ComponentName)
+		return s.SchemaNameToTypeName(schema.ComponentName)
 
 	case ContextComponentParameter:
-		return g.SchemaNameToTypeName(s.ComponentName)
+		return s.SchemaNameToTypeName(schema.ComponentName)
 
 	case ContextComponentResponse:
-		return g.SchemaNameToTypeName(s.ComponentName)
+		return s.SchemaNameToTypeName(schema.ComponentName)
 
 	case ContextComponentRequestBody:
-		return g.SchemaNameToTypeName(s.ComponentName)
+		return s.SchemaNameToTypeName(schema.ComponentName)
 
 	case ContextComponentHeader:
-		return g.SchemaNameToTypeName(s.ComponentName)
+		return s.SchemaNameToTypeName(schema.ComponentName)
 
 	case ContextClientResponseWrapper:
 		// Client response wrappers use: OperationId + responseTypeSuffix
-		return fmt.Sprintf("%s%s", g.SchemaNameToTypeName(s.OperationID), g.responseTypeSuffix)
+		return fmt.Sprintf("%s%s", s.SchemaNameToTypeName(schema.OperationID), s.responseTypeSuffix)
 
 	case ContextOperationParameter:
-		if s.OperationID != "" {
-			return g.SchemaNameToTypeName(s.OperationID) + "Parameter"
+		if schema.OperationID != "" {
+			return s.SchemaNameToTypeName(schema.OperationID) + "Parameter"
 		}
-		return g.SchemaNameToTypeName(s.ComponentName) + "Parameter"
+		return s.SchemaNameToTypeName(schema.ComponentName) + "Parameter"
 
 	case ContextOperationRequestBody:
-		if s.OperationID != "" {
-			ct := g.contentTypeSuffix(s.ContentType)
-			return g.SchemaNameToTypeName(s.OperationID) + ct + "Request"
+		if schema.OperationID != "" {
+			ct := s.contentTypeSuffix(schema.ContentType)
+			return s.SchemaNameToTypeName(schema.OperationID) + ct + "Request"
 		}
-		return g.SchemaNameToTypeName(s.ComponentName) + "Request"
+		return s.SchemaNameToTypeName(schema.ComponentName) + "Request"
 
 	case ContextOperationResponse:
-		if s.OperationID != "" {
-			ct := g.contentTypeSuffix(s.ContentType)
-			return g.SchemaNameToTypeName(s.OperationID) + s.StatusCode + ct + "Response"
+		if schema.OperationID != "" {
+			ct := s.contentTypeSuffix(schema.ContentType)
+			return s.SchemaNameToTypeName(schema.OperationID) + schema.StatusCode + ct + "Response"
 		}
-		return g.SchemaNameToTypeName(s.ComponentName) + "Response"
+		return s.SchemaNameToTypeName(schema.ComponentName) + "Response"
 
 	default:
-		return g.SchemaNameToTypeName(s.ComponentName)
+		return s.SchemaNameToTypeName(schema.ComponentName)
 	}
 }
 

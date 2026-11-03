@@ -379,10 +379,12 @@ func (s *state) BuildServerURLTypeDefinitions(spec *openapi3.T) ([]TypeDefinitio
 			}
 			typeName := serverURLVariableTypeName(srv.GoName, varName)
 			enumValues := serverURLEnumValues(v)
-			defs = append(defs, TypeDefinition{gen: s,
+			defs = append(defs, TypeDefinition{
+				gen:      s,
 				TypeName: typeName,
 				JsonName: varName,
-				Schema: Schema{gen: s,
+				Schema: Schema{
+					gen:         s,
 					GoType:      "string",
 					EnumValues:  enumValues,
 					Description: v.Description,

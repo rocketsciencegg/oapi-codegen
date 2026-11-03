@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"maps"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -946,7 +947,8 @@ func (o *OperationDefinition) GetResponseTypeDefinitions() ([]ResponseTypeDefini
 					}
 
 					td := ResponseTypeDefinition{
-						TypeDefinition: TypeDefinition{gen: gen,
+						TypeDefinition: TypeDefinition{
+							gen:      gen,
 							TypeName: typeName,
 							Schema:   responseSchema,
 						},
@@ -1242,14 +1244,15 @@ func (r ResponseContentDefinition) IsJSON() bool {
 // any configured streaming-content-types pattern (defaults merged with
 // OutputOptions.StreamingContentTypes). Templates use this to emit a
 // flush-per-chunk streaming path instead of a buffered io.Copy.
-// For manually constructed values, it panics if the default generator's
-// streaming-content-types configuration is invalid.
+// For manually constructed values, invalid streaming-content-types configuration
+// emits a warning and uses the built-in patterns.
 func (r ResponseContentDefinition) IsStreamingContentType() bool {
 	gen := generationOrDefault(r.gen)
 
 	patterns, err := gen.streamingContentTypes()
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "Warning: %v; using default streaming-content-types\n", err)
+		patterns = defaultStreamingRegexes()
 	}
 	for _, re := range patterns {
 		if re.MatchString(r.ContentType) {
@@ -1493,7 +1496,8 @@ func (s *state) OperationDefinitions(swagger *openapi3.T) ([]OperationDefinition
 
 			s.ensureExternalRefsInResponseDefinitions(&responseDefinitions, pathItem.Ref)
 
-			opDef := OperationDefinition{gen: s,
+			opDef := OperationDefinition{
+				gen:             s,
 				PathParams:      pathParams,
 				HeaderParams:    FilterParameterDefinitionByType(allParams, "header"),
 				QueryParams:     FilterParameterDefinitionByType(allParams, "query"),
@@ -1632,7 +1636,8 @@ func (s *state) WebhookOperationDefinitions(swagger *openapi3.T) ([]OperationDef
 				return nil, fmt.Errorf("error generating response definitions for webhook %q: %w", webhookName, err)
 			}
 
-			opDef := OperationDefinition{gen: s,
+			opDef := OperationDefinition{
+				gen:             s,
 				HeaderParams:    FilterParameterDefinitionByType(allParams, "header"),
 				QueryParams:     FilterParameterDefinitionByType(allParams, "query"),
 				CookieParams:    FilterParameterDefinitionByType(allParams, "cookie"),
@@ -1774,7 +1779,8 @@ func (s *state) CallbackOperationDefinitions(swagger *openapi3.T) ([]OperationDe
 							return nil, fmt.Errorf("error generating response definitions for callback %q: %w", callbackName, err)
 						}
 
-						opDef := OperationDefinition{gen: s,
+						opDef := OperationDefinition{
+							gen:             s,
 							HeaderParams:    FilterParameterDefinitionByType(allParams, "header"),
 							QueryParams:     FilterParameterDefinitionByType(allParams, "query"),
 							CookieParams:    FilterParameterDefinitionByType(allParams, "cookie"),
@@ -1913,7 +1919,8 @@ func (s *state) GenerateBodyDefinitions(operationID string, bodyOrRef *openapi3.
 					bodySchema.GoType = s.GenStructFromSchema(bodySchema)
 				}
 
-				td := TypeDefinition{gen: s,
+				td := TypeDefinition{
+					gen:      s,
 					TypeName: bodyTypeName,
 					Schema:   bodySchema,
 				}
@@ -2031,7 +2038,8 @@ func (s *state) GenerateResponseDefinitions(operationID string, responses map[st
 				}
 			}
 
-			rcd := ResponseContentDefinition{gen: s,
+			rcd := ResponseContentDefinition{
+				gen:         s,
 				ContentType: contentType,
 				NameTag:     tag,
 				Schema:      contentSchema,
@@ -2084,7 +2092,8 @@ func (s *state) GenerateResponseDefinitions(operationID string, responses map[st
 			responseHeaderDefinitions = append(responseHeaderDefinitions, headerDefinition)
 		}
 
-		rd := ResponseDefinition{gen: s,
+		rd := ResponseDefinition{
+			gen:        s,
 			StatusCode: statusCode,
 			Contents:   responseContentDefinitions,
 			Headers:    responseHeaderDefinitions,
@@ -2168,7 +2177,7 @@ func (s *state) GenerateTypeDefsForOperation(op OperationDefinition) []TypeDefin
 
 // GenerateParamsTypes defines the schema for a parameters definition object
 // which encapsulates all the query, header and cookie parameters for an operation.
-func (g *state) GenerateParamsTypes(op OperationDefinition) []TypeDefinition {
+func (s *state) GenerateParamsTypes(op OperationDefinition) []TypeDefinition {
 	var typeDefs []TypeDefinition
 
 	objectParams := op.QueryParams
@@ -2177,14 +2186,15 @@ func (g *state) GenerateParamsTypes(op OperationDefinition) []TypeDefinition {
 
 	typeName := op.OperationId + "Params"
 
-	s := Schema{gen: g}
+	schema := Schema{gen: s}
 	for _, param := range objectParams {
 		pSchema := param.Schema
 		param.Style()
 		if pSchema.HasAdditionalProperties {
 			propRefName := strings.Join([]string{typeName, param.GoName()}, "_")
 			pSchema.RefType = propRefName
-			typeDefs = append(typeDefs, TypeDefinition{gen: g,
+			typeDefs = append(typeDefs, TypeDefinition{
+				gen:      s,
 				TypeName: propRefName,
 				Schema:   param.Schema,
 			})
@@ -2199,7 +2209,8 @@ func (g *state) GenerateParamsTypes(op OperationDefinition) []TypeDefinition {
 			maps.Copy(extensions, combinedSchemaExtensions(param.Spec.Schema))
 		}
 		maps.Copy(extensions, param.Spec.Extensions)
-		prop := Property{gen: g,
+		prop := Property{
+			gen:           s,
 			Description:   param.Spec.Description,
 			JsonFieldName: param.ParamName,
 			Required:      param.Required,
@@ -2208,14 +2219,15 @@ func (g *state) GenerateParamsTypes(op OperationDefinition) []TypeDefinition {
 			Extensions:    extensions,
 			Deprecated:    param.Spec.Deprecated,
 		}
-		s.Properties = append(s.Properties, prop)
+		schema.Properties = append(schema.Properties, prop)
 	}
 
-	s.GoType = g.GenStructFromSchema(s)
+	schema.GoType = s.GenStructFromSchema(schema)
 
-	td := TypeDefinition{gen: g,
+	td := TypeDefinition{
+		gen:      s,
 		TypeName: typeName,
-		Schema:   s,
+		Schema:   schema,
 	}
 	return append(typeDefs, td)
 }

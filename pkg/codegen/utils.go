@@ -25,6 +25,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -283,10 +284,11 @@ func ToCamelCaseWithDigits(s string) string {
 
 // ToCamelCaseWithInitialisms function will convert query-arg style strings to CamelCase with initialisms in uppercase.
 // So, httpOperationId would be converted to HTTPOperationID
-func (g *state) ToCamelCaseWithInitialisms(s string) string {
-	parts := camelCaseMatchParts.FindAllString(ToCamelCaseWithDigits(s), -1)
+func (s *state) ToCamelCaseWithInitialisms(str string) string {
+	s.initInitialisms()
+	parts := camelCaseMatchParts.FindAllString(ToCamelCaseWithDigits(str), -1)
 	for i := range parts {
-		if v, ok := g.initialismsMap[strings.ToLower(parts[i])]; ok {
+		if v, ok := s.initialismsMap[strings.ToLower(parts[i])]; ok {
 			parts[i] = v
 		}
 	}
@@ -301,7 +303,28 @@ var initialismsList = []string{
 	"URI", "URL", "UTF8", "VM", "XML", "XMPP", "XSRF", "XSS", "SIP", "RTP", "AMQP", "DB", "TS",
 }
 
-func (s *state) makeInitialismsMap(additionalInitialisms []string) map[string]string {
+var defaultInitialismsMap = sync.OnceValue(func() map[string]string {
+	return makeInitialismsMap(nil)
+})
+
+var defaultInitialismRegex = sync.OnceValue(func() *regexp.Regexp {
+	return makeInitialismRegex(nil)
+})
+
+// initInitialisms builds only the lookup table needed for initialism naming.
+// The built-in table is immutable and shared across runs.
+func (s *state) initInitialisms() {
+	if s.initialismsMap == nil {
+		if len(s.options.OutputOptions.AdditionalInitialisms) == 0 {
+			s.initialismsMap = defaultInitialismsMap()
+		} else {
+			s.initialismsMap = makeInitialismsMap(s.options.OutputOptions.AdditionalInitialisms)
+		}
+	}
+}
+
+// makeInitialismsMap builds the case-insensitive initialism lookup table.
+func makeInitialismsMap(additionalInitialisms []string) map[string]string {
 	l := append(slices.Clone(initialismsList), additionalInitialisms...)
 
 	m := make(map[string]string, len(l))
@@ -309,10 +332,13 @@ func (s *state) makeInitialismsMap(additionalInitialisms []string) map[string]st
 		m[strings.ToLower(l[i])] = l[i]
 	}
 
-	// Create a regex to match the initialisms
-	s.targetWordRegex = regexp.MustCompile(`(?i)(` + strings.Join(l, "|") + `)`)
-
 	return m
+}
+
+// makeInitialismRegex compiles the replacement pattern for recognized initialisms.
+func makeInitialismRegex(additionalInitialisms []string) *regexp.Regexp {
+	l := append(slices.Clone(initialismsList), additionalInitialisms...)
+	return regexp.MustCompile(`(?i)(` + strings.Join(l, "|") + `)`)
 }
 
 // ToCamelCaseWithInitialism converts str to camel case and capitalizes recognized initialisms.
@@ -320,27 +346,34 @@ func (s *state) ToCamelCaseWithInitialism(str string) string {
 	return s.replaceInitialism(ToCamelCase(str))
 }
 
-func (g *state) replaceInitialism(s string) string {
+func (s *state) replaceInitialism(str string) string {
+	if s.targetWordRegex == nil {
+		if len(s.options.OutputOptions.AdditionalInitialisms) == 0 {
+			s.targetWordRegex = defaultInitialismRegex()
+		} else {
+			s.targetWordRegex = makeInitialismRegex(s.options.OutputOptions.AdditionalInitialisms)
+		}
+	}
 	// These strings do not apply CamelCase
 	// Do not do CamelCase when these characters match when the preceding character is lowercase
-	return g.targetWordRegex.ReplaceAllStringFunc(s, func(s string) string {
+	return s.targetWordRegex.ReplaceAllStringFunc(str, func(str string) string {
 		// If the preceding character is lowercase, do not do CamelCase
-		if unicode.IsLower(rune(s[0])) {
-			return s
+		if unicode.IsLower(rune(str[0])) {
+			return str
 		}
-		return strings.ToUpper(s)
+		return strings.ToUpper(str)
 	})
 }
 
 // mediaTypeToCamelCase converts a media type to a PascalCase representation
-func (g *state) mediaTypeToCamelCase(s string) string {
+func (s *state) mediaTypeToCamelCase(str string) string {
 	// ToCamelCase doesn't - and won't - add `/` to the characters it'll allow word boundary
-	s = strings.Replace(s, "/", "_", 1)
+	str = strings.Replace(str, "/", "_", 1)
 	// including a _ to make sure that these are treated as word boundaries by `ToCamelCase`
-	s = strings.Replace(s, "*", "Wildcard_", 1)
-	s = strings.Replace(s, "+", "Plus_", 1)
+	str = strings.Replace(str, "*", "Wildcard_", 1)
+	str = strings.Replace(str, "+", "Plus_", 1)
 
-	return g.ToCamelCaseWithInitialism(s)
+	return s.ToCamelCaseWithInitialism(str)
 }
 
 // SortedMapKeys takes a map with keys of type string and returns a slice of those

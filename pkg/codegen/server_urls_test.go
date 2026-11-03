@@ -69,7 +69,7 @@ func renderServerURLs(t *testing.T, spec *openapi3.T) string {
 	t.Helper()
 	// Generate registers `opts` before parsing; mirror that here so the
 	// (unrelated) framework templates parse cleanly.
-	tmpl := template.New("oapi-codegen").Funcs(gen.templateFunctions)
+	tmpl := template.New("oapi-codegen").Funcs(gen.functions(gen.templateOverrides))
 	require.NoError(t, LoadTemplates(templates, tmpl))
 	out, err := gen.GenerateServerURLs(tmpl, spec)
 	require.NoError(t, err)

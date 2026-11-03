@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // defaultStreamingContentTypes are the regex patterns matched against
@@ -17,6 +18,14 @@ var defaultStreamingContentTypes = []string{
 	"application/jsonl",
 	"application/x-ndjson",
 }
+
+var defaultStreamingRegexes = sync.OnceValue(func() []*regexp.Regexp {
+	patterns, err := compileStreamingContentTypes(nil)
+	if err != nil {
+		panic(fmt.Sprintf("compiling default streaming-content-types: %v", err))
+	}
+	return patterns
+})
 
 type AdditionalImport struct {
 	Alias   string `yaml:"alias,omitempty"`

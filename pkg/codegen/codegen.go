@@ -51,7 +51,7 @@ type state struct {
 	nameNormalizer     NameNormalizer
 	responseTypeSuffix string
 	targetWordRegex    *regexp.Regexp
-	templateFunctions  template.FuncMap
+	templateOverrides  template.FuncMap
 	options            Configuration
 	spec               *openapi3.T
 	// is31 is true when the loaded spec declares OpenAPI version >=3.1.
@@ -202,8 +202,6 @@ func (s *state) Generate(spec *openapi3.T) (string, error) {
 		return "", fmt.Errorf("you have specified `additional-initialisms`, but the `name-normalizer` is not set to `ToCamelCaseWithInitialisms`. Please specify `name-normalizer: ToCamelCaseWithInitialisms` or remove the `additional-initialisms` configuration")
 	}
 
-	s.initialismsMap = s.makeInitialismsMap(opts.OutputOptions.AdditionalInitialisms)
-
 	// Compile streaming-content-type patterns (defaults merged with user-supplied).
 	// Validate() already caught syntax errors, but surface any regression here too.
 	if _, err := s.streamingContentTypes(); err != nil {
@@ -233,7 +231,7 @@ func (s *state) Generate(spec *openapi3.T) (string, error) {
 	}
 
 	// This creates the golang templates text package
-	t := template.New("oapi-codegen").Funcs(s.templateFunctions)
+	t := template.New("oapi-codegen").Funcs(s.functions(s.templateOverrides))
 	// This parses all of our own template files into the template object
 	// above
 	err := LoadTemplates(templates, t)
@@ -1129,7 +1127,8 @@ func (s *state) GenerateTypesForSchemas(t *template.Template, schemas map[string
 			goTypeName = resolved
 		}
 
-		types = append(types, TypeDefinition{gen: s,
+		types = append(types, TypeDefinition{
+			gen:      s,
 			JsonName: schemaName,
 			TypeName: goTypeName,
 			Schema:   goSchema,
@@ -1232,7 +1231,8 @@ func (s *state) GenerateTypesForResponses(t *template.Template, responses openap
 				goTypeName = resolved
 			}
 
-			typeDef := TypeDefinition{gen: s,
+			typeDef := TypeDefinition{
+				gen:      s,
 				JsonName: responseName,
 				Schema:   goType,
 				TypeName: goTypeName,
@@ -1289,7 +1289,8 @@ func (s *state) GenerateTypesForRequestBodies(t *template.Template, bodies map[s
 				goTypeName = resolved
 			}
 
-			typeDef := TypeDefinition{gen: s,
+			typeDef := TypeDefinition{
+				gen:      s,
 				JsonName: requestBodyName,
 				Schema:   goType,
 				TypeName: goTypeName,
@@ -1325,12 +1326,14 @@ func (s *state) GenerateTypesForSecuritySchemes(t *template.Template, schemes ma
 		}
 		// Generate a type to be used as a key in context.WithValue
 		goTypeName := LowercaseFirstCharacter(s.SchemaNameToTypeName(schemeName)) + "ContextKey"
-		goType := Schema{gen: s,
+		goType := Schema{
+			gen:         s,
 			GoType:      "string",
 			Description: fmt.Sprintf("is the context key for %s security scheme", schemeName),
 		}
 
-		types = append(types, TypeDefinition{gen: s,
+		types = append(types, TypeDefinition{
+			gen:      s,
 			JsonName: schemeName,
 			TypeName: goTypeName,
 			Schema:   goType,
@@ -1797,18 +1800,18 @@ func LoadTemplates(src embed.FS, t *template.Template) error {
 	})
 }
 
-func (g *state) OperationSchemaImports(s *Schema) (map[string]goImport, error) {
+func (s *state) OperationSchemaImports(schema *Schema) (map[string]goImport, error) {
 	res := map[string]goImport{}
 
-	for _, p := range s.Properties {
-		imprts, err := g.GoSchemaImports(&openapi3.SchemaRef{Value: p.Schema.OAPISchema})
+	for _, p := range schema.Properties {
+		imprts, err := s.GoSchemaImports(&openapi3.SchemaRef{Value: p.Schema.OAPISchema})
 		if err != nil {
 			return nil, err
 		}
 		maps.Copy(res, imprts)
 	}
 
-	imprts, err := g.GoSchemaImports(&openapi3.SchemaRef{Value: s.OAPISchema})
+	imprts, err := s.GoSchemaImports(&openapi3.SchemaRef{Value: schema.OAPISchema})
 	if err != nil {
 		return nil, err
 	}

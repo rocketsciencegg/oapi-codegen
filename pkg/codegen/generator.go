@@ -94,6 +94,8 @@ func Generate(spec *openapi3.T, options Configuration) (string, error) {
 
 // SetGlobalStateSpec sets the default specification used by package-level
 // helpers. It does not affect Generate or existing generated model values.
+// It applies only to the current default generator; call it after SetDefault.
+// Replacing the default does not carry the specification to the new generator.
 //
 // Deprecated: use a Generator for generation instead of implicit helper state.
 func SetGlobalStateSpec(spec *openapi3.T) {
@@ -136,9 +138,9 @@ func (g *Generator) newStateWithConfig(config Configuration) *state {
 		importMapping:      constructImportMapping(config.ImportMapping),
 		nameNormalizer:     ToCamelCase,
 		responseTypeSuffix: "Response",
+		templateOverrides:  g.functions,
 	}
 
-	gen.initialismsMap = gen.makeInitialismsMap(config.OutputOptions.AdditionalInitialisms)
 	gen.nameNormalizer = gen.normalizerFor(NameNormalizerFunction(config.OutputOptions.NameNormalizer))
 	if spec != nil {
 		gen.is31 = spec.IsOpenAPI31OrLater()
@@ -151,8 +153,6 @@ func (g *Generator) newStateWithConfig(config Configuration) *state {
 	if mapping := config.OutputOptions.TypeMapping; mapping != nil {
 		gen.typeMapping = DefaultTypeMapping.Merge(*mapping)
 	}
-
-	gen.templateFunctions = gen.functions(g.functions)
 
 	return gen
 }

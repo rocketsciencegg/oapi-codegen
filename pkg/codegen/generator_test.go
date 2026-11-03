@@ -2,6 +2,8 @@ package codegen
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -392,7 +394,7 @@ func TestDefaultGeneratorInvalidContentTypes(t *testing.T) {
 		options OutputOptions
 		message string
 	}{
-		{"streaming content types", OutputOptions{StreamingContentTypes: []string{"["}}, "invalid streaming-content-type pattern"},
+		{"streaming content types", OutputOptions{StreamingContentTypes: []string{"^application/x-stream$", "["}}, "invalid streaming-content-type pattern"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			SetDefault(NewGenerator(WithConfig(Configuration{OutputOptions: tc.options})))
@@ -402,10 +404,26 @@ func TestDefaultGeneratorInvalidContentTypes(t *testing.T) {
 				}}},
 			}, "")
 			require.ErrorContains(t, err, tc.message)
+			_, err = Default().Generate(loadIsolatedGenerationSpec(t, "3.0.3"))
+			require.ErrorContains(t, err, tc.message)
 			if len(tc.options.StreamingContentTypes) > 0 {
-				require.Panics(t, func() {
-					(ResponseContentDefinition{ContentType: "text/event-stream"}).IsStreamingContentType()
-				})
+				warnings, err := os.CreateTemp(t.TempDir(), "warnings")
+				require.NoError(t, err)
+				t.Cleanup(func() { require.NoError(t, warnings.Close()) })
+				stderr := os.Stderr
+				os.Stderr = warnings
+				defer func() { os.Stderr = stderr }()
+				for _, contentType := range []string{"text/event-stream", "application/jsonl", "application/x-ndjson"} {
+					require.True(t, (ResponseContentDefinition{ContentType: contentType}).IsStreamingContentType())
+				}
+				require.False(t, (ResponseContentDefinition{ContentType: "application/json"}).IsStreamingContentType())
+				require.False(t, (ResponseContentDefinition{ContentType: "application/x-stream"}).IsStreamingContentType())
+				_, err = warnings.Seek(0, io.SeekStart)
+				require.NoError(t, err)
+				message, err := io.ReadAll(warnings)
+				require.NoError(t, err)
+				require.Contains(t, string(message), "Warning: "+tc.message)
+				require.Contains(t, string(message), "using default streaming-content-types")
 			}
 		})
 	}
@@ -441,4 +459,90 @@ func TestSetDefaultConcurrent(t *testing.T) {
 	SetDefault(second)
 	require.Equal(t, "RecordFirst", run.genResponseTypeName("Record"))
 	require.Equal(t, "RecordSecond", genResponseTypeName("Record"))
+}
+
+func BenchmarkDefaultGeneratorHelpers(b *testing.B) {
+	for _, tc := range []struct {
+		name string
+		call func() string
+	}{
+		{"schema-name", func() string { return SchemaNameToTypeName("fooBar") }},
+		{"initialisms", func() string { return ToCamelCaseWithInitialisms("httpId") }},
+		{"initialism-replacement", func() string { return ToCamelCaseWithInitialism("httpId") }},
+		{"response-name", func() string { return genResponseTypeName("GetRecord") }},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				tc.call()
+			}
+		})
+	}
+}
+
+func TestDefaultGeneratorSpecOrder(t *testing.T) {
+	previous := Default()
+	t.Cleanup(func() { SetDefault(previous) })
+	first := NewGenerator()
+	second := NewGenerator()
+	spec := &openapi3.T{Components: &openapi3.Components{
+		Schemas: openapi3.Schemas{"Record": {Value: &openapi3.Schema{
+			Extensions: map[string]any{extGoName: "Renamed"},
+		}}},
+	}}
+	SetDefault(first)
+	SetGlobalStateSpec(spec)
+	retained := newDefaultState()
+	name, err := RefPathToGoType("#/components/schemas/Record")
+	require.NoError(t, err)
+	require.Equal(t, "Renamed", name)
+
+	SetDefault(second)
+	name, err = RefPathToGoType("#/components/schemas/Record")
+	require.NoError(t, err)
+	require.Equal(t, "Record", name, "changing defaults does not transfer the legacy spec")
+	name, err = retained.RefPathToGoType("#/components/schemas/Record")
+	require.NoError(t, err)
+	require.Equal(t, "Renamed", name, "existing state retains its original specification")
+
+	SetGlobalStateSpec(spec)
+	name, err = RefPathToGoType("#/components/schemas/Record")
+	require.NoError(t, err)
+	require.Equal(t, "Renamed", name, "set the legacy spec after changing defaults")
+	SetDefault(first)
+	name, err = RefPathToGoType("#/components/schemas/Record")
+	require.NoError(t, err)
+	require.Equal(t, "Renamed", name, "switching back restores the generator's own legacy spec")
+}
+
+func TestGeneratorLazyNaming(t *testing.T) {
+	for _, custom := range []bool{false, true} {
+		t.Run(fmt.Sprint(custom), func(t *testing.T) {
+			config := Configuration{}
+			if custom {
+				config.OutputOptions.AdditionalInitialisms = []string{"WIDGET"}
+				config.OutputOptions.NameNormalizer = string(NameNormalizerFunctionToCamelCaseWithInitialisms)
+			}
+			gen := NewGenerator(WithConfig(config)).newState()
+			require.Nil(t, gen.initialismsMap)
+			require.Nil(t, gen.targetWordRegex)
+			require.Equal(t, "FooBar", gen.SchemaNameToTypeName("fooBar"))
+			if !custom {
+				require.Nil(t, gen.initialismsMap, "ordinary naming does not need the initialism lookup table")
+			}
+			require.Nil(t, gen.targetWordRegex, "normalization must not compile the replacement regex")
+			want := "WidgetID"
+			if custom {
+				want = "WIDGETID"
+			}
+			require.Equal(t, want, gen.ToCamelCaseWithInitialisms("widgetId"))
+			require.NotNil(t, gen.initialismsMap)
+			require.Nil(t, gen.targetWordRegex, "lookup-table naming does not need the replacement regex")
+			require.Equal(t, want, gen.ToCamelCaseWithInitialism("widgetId"))
+			require.NotNil(t, gen.targetWordRegex)
+			if !custom {
+				require.Same(t, defaultInitialismRegex(), gen.targetWordRegex)
+			}
+		})
+	}
 }
